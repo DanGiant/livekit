@@ -77,6 +77,8 @@ type Config struct {
 	Development bool `yaml:"development,omitempty"`
 
 	Metric metric.MetricConfig `yaml:"metric,omitempty"`
+
+	RtcRelay RtcRelayConfig `yaml:"rtc_relay,omitempty"`
 }
 
 type RTCConfig struct {
@@ -303,6 +305,22 @@ func DefaultAPIConfig() APIConfig {
 	}
 }
 
+type RtcRelayConfig struct {
+	Enabled bool       `yaml:"enabled,omitempty"`
+	Nats    NatsConfig `yaml:"nats,omitempty"`
+}
+
+type NatsConfig struct {
+	Address string `yaml:"address,omitempty"`
+}
+
+func (r *NatsConfig) IsConfigured() bool {
+	if r.Address != "" {
+		return true
+	}
+	return false
+}
+
 var DefaultConfig = Config{
 	Port: 7880,
 	RTC: RTCConfig{
@@ -379,6 +397,12 @@ var DefaultConfig = Config{
 	PSRPC:  rpc.DefaultPSRPCConfig,
 	Keys:   map[string]string{},
 	Metric: metric.DefaultMetricConfig,
+	RtcRelay: RtcRelayConfig{
+		Enabled: false,
+		Nats: NatsConfig{
+			Address: "localhost:4222",
+		},
+	},
 }
 
 func NewConfig(confString string, strictMode bool, c *cli.Context, baseFlags []cli.Flag) (*Config, error) {
