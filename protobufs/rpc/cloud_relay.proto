@@ -95,13 +95,15 @@ message ForwardParticipant {
 
 message RoomSignalRelayRequest {
   StartRelaySession start_relay_session = 1;
-  repeated RelayedSignalRequest requests = 3;
+//  repeated RelayedSignalRequest requests = 3;
+  repeated SignalRequest requests = 3;
   uint64 seq = 4;
   bool close = 5;
 }
 
 message RoomSignalRelayResponse {
-  repeated RelayedSignalResponse responses = 2;
+//  repeated RelayedSignalResponse responses = 2;
+  repeated SignalResponse responses = 2;
   uint64 seq = 3;
   bool close = 4;
 }
@@ -127,39 +129,39 @@ message RoomOfflineResponse {
 }
 
 // Relayed signal messages
-message RelayedSignalRequest {
-  oneof message {
-    ForwardParticipant forward = 1;
-    // initial join exchange, for publisher
-    SessionDescription offer = 2;
-    // participant answering publisher offer
-    SessionDescription answer = 3;
-    // trickle
-    TrickleRequest trickle = 4;
-    // add track
-    AddTrackRequest add_track = 5;
-    // mute the participant's published tracks
-    MuteTrackRequest mute = 6;
-
-    // heart beat ping
-    Ping ping_req = 16;
-  }
-}
-
-message RelayedSignalResponse {
-  oneof message {
-    // sent when server answers publisher
-    SessionDescription answer = 1;
-    // sent when server is sending subscriber an offer
-    SessionDescription offer = 2;
-    // sent when an ICE candidate is available
-    TrickleRequest trickle = 3;
-    // sent when participants in the room has changed
-    ParticipantUpdate update = 4;
-
-    // respond to Ping
-    Pong pong_resp = 20;
-  }
-}
+//message RelayedSignalRequest {
+//  oneof message {
+//    ForwardParticipant forward = 1;
+//    // initial join exchange, for publisher
+//    SessionDescription offer = 2;
+//    // participant answering publisher offer
+//    SessionDescription answer = 3;
+//    // trickle
+//    TrickleRequest trickle = 4;
+//    // add track
+//    AddTrackRequest add_track = 5;
+//    // mute the participant's published tracks
+//    MuteTrackRequest mute = 6;
+//
+//    // heart beat ping
+//    Ping ping_req = 16;
+//  }
+//}
+//
+//message RelayedSignalResponse {
+//  oneof message {
+//    // sent when server answers publisher
+//    SessionDescription answer = 1;
+//    // sent when server is sending subscriber an offer
+//    SessionDescription offer = 2;
+//    // sent when an ICE candidate is available
+//    TrickleRequest trickle = 3;
+//    // sent when participants in the room has changed
+//    ParticipantUpdate update = 4;
+//
+//    // respond to Ping
+//    Pong pong_resp = 20;
+//  }
+//}
 
 

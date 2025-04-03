@@ -83,19 +83,19 @@ func (s *defaultRelaySessionHandler) HandleRelaySession(
 					return
 				}
 
-				req := msg.(*rpc.RelayedSignalRequest)
+				req := msg.(*livekit.SignalRequest)
 				switch req.GetMessage().(type) {
-				case *rpc.RelayedSignalRequest_Offer:
+				case *livekit.SignalRequest_Offer:
 					log.Printf("Received offer")
-				case *rpc.RelayedSignalRequest_Answer:
+				case *livekit.SignalRequest_Answer:
 					log.Printf("Received answer")
-				case *rpc.RelayedSignalRequest_PingReq:
+				case *livekit.SignalRequest_PingReq:
 					log.Printf("Received ping req")
 					respTicker.Stop()
 					respTicker = time.NewTicker(5 * time.Second)
 					go func() {
-						resMessageOut := &rpc.RelayedSignalResponse{
-							Message: &rpc.RelayedSignalResponse_PongResp{PongResp: &livekit.Pong{
+						resMessageOut := &livekit.SignalResponse{
+							Message: &livekit.SignalResponse_PongResp{PongResp: &livekit.Pong{
 								Timestamp: time.Now().UnixMilli(),
 							}},
 						}
@@ -357,11 +357,11 @@ type roomSignalRelayRequestMessageWriter struct{}
 func (e roomSignalRelayRequestMessageWriter) Write(seq uint64, close bool, msgs []proto.Message) *rpc.RoomSignalRelayRequest {
 	r := &rpc.RoomSignalRelayRequest{
 		Seq:      seq,
-		Requests: make([]*rpc.RelayedSignalRequest, 0, len(msgs)),
+		Requests: make([]*livekit.SignalRequest, 0, len(msgs)),
 		Close:    close,
 	}
 	for _, m := range msgs {
-		r.Requests = append(r.Requests, m.(*rpc.RelayedSignalRequest))
+		r.Requests = append(r.Requests, m.(*livekit.SignalRequest))
 	}
 	return r
 }
@@ -381,11 +381,11 @@ type roomSignalRelayResponseMessageWriter struct{}
 func (e roomSignalRelayResponseMessageWriter) Write(seq uint64, close bool, msgs []proto.Message) *rpc.RoomSignalRelayResponse {
 	r := &rpc.RoomSignalRelayResponse{
 		Seq:       seq,
-		Responses: make([]*rpc.RelayedSignalResponse, 0, len(msgs)),
+		Responses: make([]*livekit.SignalResponse, 0, len(msgs)),
 		Close:     close,
 	}
 	for _, m := range msgs {
-		r.Responses = append(r.Responses, m.(*rpc.RelayedSignalResponse))
+		r.Responses = append(r.Responses, m.(*livekit.SignalResponse))
 	}
 	return r
 }

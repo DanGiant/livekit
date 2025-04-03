@@ -141,18 +141,18 @@ func main() {
 							continue
 						}
 
-						res, ok := msg.(*rpc.RelayedSignalResponse)
+						res, ok := msg.(*livekit.SignalResponse)
 						if !ok {
 							log.Printf("Parse message failed!")
 							continue
 						}
 
 						switch res.Message.(type) {
-						case *rpc.RelayedSignalResponse_Offer:
+						case *livekit.SignalResponse_Offer:
 							log.Printf("receive offer response: %v\n", res.Message)
-						case *rpc.RelayedSignalResponse_Answer:
+						case *livekit.SignalResponse_Answer:
 							log.Printf("receive answer response: %v\n", res.Message)
-						case *rpc.RelayedSignalResponse_PongResp:
+						case *livekit.SignalResponse_PongResp:
 							log.Printf("receive pong response: %v\n", res.Message)
 						}
 					}
@@ -165,8 +165,8 @@ func main() {
 			for {
 				select {
 				case <-ticker.C:
-					reqMessageIn := &rpc.RelayedSignalRequest{
-						Message: &rpc.RelayedSignalRequest_PingReq{PingReq: &livekit.Ping{
+					reqMessageIn := &livekit.SignalRequest{
+						Message: &livekit.SignalRequest_PingReq{PingReq: &livekit.Ping{
 							Timestamp: time.Now().UnixMilli(),
 						}},
 					}
