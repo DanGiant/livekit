@@ -199,7 +199,7 @@ func CopySignalStreamToMessageChannel[SendType, RecvType RelaySignalMessage](
 				prometheus.MessageCounter.WithLabelValues("signal", "failure").Add(1)
 				return err
 			}
-			prometheus.MessageCounter.WithLabelValues("signal", "success").Add(1)
+			//prometheus.MessageCounter.WithLabelValues("signal", "success").Add(1)
 		}
 
 		if msg.GetClose() {

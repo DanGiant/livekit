@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package livekit;
+
+option go_package = ".;rpc";
+//option csharp_namespace = "LiveKit.Proto";
+//option ruby_package = "LiveKit::Proto";
+
+import "options.proto";
+import "livekit_models.proto";
+import "livekit_internal.proto";
+import "livekit_rtc.proto";
+
+/*
+paste the next command on terminal to compile this proto.
+
+protoc \
+-I /Users/chenjian/go/pkg/mod/github.com/livekit/protocol@v1.35.1-0.20250320161708-6d044a0462b3/protobufs \
+-I /Users/chenjian/go/pkg/mod/github.com/livekit/psrpc@v0.6.1-0.20250205181828-a0beed2e4126/protoc-gen-psrpc/options \
+-I=. \
+--go_out=./pkg/rpc \
+--psrpc_out=./pkg/rpc \
+./protobufs/rpc/cloud_relay.proto
+
+*/
+
+// CloudRelayService, to setup and manage cloud media relay between SFUs
+service CloudRelayService {
+  // Room synchronization
+  rpc RoomOnline(RoomOnlineRequest) returns (RoomOnlineResponse) {
+    option (psrpc.options) = {
+      topics: true
+      type: MULTI
+      topic_params: {
+        group: "room"
+        names: ["room"]
+        typed: true
+      };
+    };
+  };
+
+  rpc RoomOffline(RoomOfflineRequest) returns (RoomOfflineResponse) {
+    option (psrpc.options) = {
+      topics: true
+      type: MULTI
+      topic_params: {
+        group: "room"
+        names: ["room"]
+        typed: true
+      };
+    };
+  };
+
+  rpc RoomSignalRelay(RoomSignalRelayRequest) returns (RoomSignalRelayResponse) {
+    option (psrpc.options) = {
+      stream: true
+      topics: true
+      topic_params: {
+        group: "node"
+        names: ["node_id"]
+        typed: true
+        single_server: true
+      };
+    };
+  };
+}
+
+message StartRelaySession {
+  string room_name = 1;
+  string id = 2;
+  string identity = 3;
+  string connection_id = 4;
+  // if a client is reconnecting (i.e. resume instead of restart)
+  bool reconnect = 5;
+  string from_node = 6;
+  string region = 7;
+  bool auto_subscribe = 9;
+  bool hidden = 10;
+  ClientInfo client = 11;
+  bool recorder = 12;
+  string name = 13;
+  // A user's ClaimGrants serialized in JSON
+  string grants_json = 14;
+  bool adaptive_stream = 15;
+  //if reconnect, client will set current sid
+  string participant_id = 16;
+  ReconnectReason reconnect_reason = 17;
+  optional bool subscriber_allow_pause = 18;
+  bool disable_ice_lite = 19;
+}
+
+message ForwardParticipant {
+  ParticipantInfo participant = 1;
+}
+
+message RoomSignalRelayRequest {
+  StartRelaySession start_relay_session = 1;
+  repeated RelayedSignalRequest requests = 3;
+  uint64 seq = 4;
+  bool close = 5;
+}
+
+message RoomSignalRelayResponse {
+  repeated RelayedSignalResponse responses = 2;
+  uint64 seq = 3;
+  bool close = 4;
+}
+
+message RoomOnlineRequest {
+  string room_name = 1;
+  Node node = 2;
+}
+
+message RoomOnlineResponse {
+  string room_name = 1;
+  string node_id = 2;
+}
+
+message RoomOfflineRequest {
+  string room_name = 1;
+  string node_id = 2;
+}
+
+message RoomOfflineResponse {
+  string room_name = 1;
+  string node_id = 2;
+}
+
+// Relayed signal messages
+message RelayedSignalRequest {
+  oneof message {
+    ForwardParticipant forward = 1;
+    // initial join exchange, for publisher
+    SessionDescription offer = 2;
+    // participant answering publisher offer
+    SessionDescription answer = 3;
+    // trickle
+    TrickleRequest trickle = 4;
+    // add track
+    AddTrackRequest add_track = 5;
+    // mute the participant's published tracks
+    MuteTrackRequest mute = 6;
+
+    // heart beat ping
+    Ping ping_req = 16;
+  }
+}
+
+message RelayedSignalResponse {
+  oneof message {
+    // sent when server answers publisher
+    SessionDescription answer = 1;
+    // sent when server is sending subscriber an offer
+    SessionDescription offer = 2;
+    // sent when an ICE candidate is available
+    TrickleRequest trickle = 3;
+    // sent when participants in the room has changed
+    ParticipantUpdate update = 4;
+
+    // respond to Ping
+    Pong pong_resp = 20;
+  }
+}
+
+
