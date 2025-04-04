@@ -90,21 +90,21 @@ func (s *defaultRelaySessionHandler) HandleRelaySession(
 				case *livekit.SignalRequest_Answer:
 					log.Printf("Received answer")
 				case *livekit.SignalRequest_PingReq:
-					log.Printf("Received ping req")
+					log.Printf("Received Request: %v", req)
 					respTicker.Stop()
 					respTicker = time.NewTicker(5 * time.Second)
 					go func() {
+						resMsg := livekit.SignalResponse_PongResp{PongResp: &livekit.Pong{
+							Timestamp: time.Now().UnixMilli(),
+						}}
 						resMessageOut := &livekit.SignalResponse{
-							Message: &livekit.SignalResponse_PongResp{PongResp: &livekit.Pong{
-								Timestamp: time.Now().UnixMilli(),
-							}},
+							Message: &resMsg,
 						}
-						log.Printf("Writing pong response...")
 						err := responseSink.WriteMessage(resMessageOut)
 						if err != nil {
 							log.Printf("Error writing response: %v", err)
 						}
-						log.Printf("Written pong response!")
+						log.Printf("Response: %v", resMsg)
 					}()
 				}
 			}
