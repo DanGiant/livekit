@@ -127,6 +127,8 @@ type Room struct {
 	agentParticpants          map[livekit.ParticipantIdentity]*agentJob
 	bufferFactory             *buffer.FactoryOfBufferFactory
 
+	remoteParticipants map[livekit.ParticipantIdentity]types.Participant
+
 	// batch update participant info for non-publishers
 	batchedUpdates   map[livekit.ParticipantIdentity]*participantUpdate
 	batchedUpdatesMu sync.Mutex
@@ -325,6 +327,12 @@ func (r *Room) GetParticipant(identity livekit.ParticipantIdentity) types.LocalP
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	return r.participants[identity]
+}
+
+func (r *Room) GetRemoteParticipant(identity livekit.ParticipantIdentity) types.Participant {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	return r.remoteParticipants[identity]
 }
 
 func (r *Room) GetParticipantByID(participantID livekit.ParticipantID) types.LocalParticipant {

@@ -4,8 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/livekit/livekit-server/pkg/config"
-	"github.com/livekit/livekit-server/pkg/relay"
 	"github.com/livekit/livekit-server/pkg/routing"
+	"github.com/livekit/livekit-server/pkg/service"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/psrpc"
 	"github.com/nats-io/nats.go"
@@ -65,7 +65,7 @@ func main() {
 		StreamBufferSize: 1000,
 		ConnectAttempts:  3,
 	}
-	server, err := relay.NewDefaultCloudRelaySignalServer(node, roomName, bus, signalRelayConfig, nil)
+	server, err := service.NewDefaultCloudRelaySignalServer(node, roomName, bus, signalRelayConfig, nil)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v\n", err)
 		os.Exit(1)

@@ -5,9 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"github.com/livekit/livekit-server/pkg/config"
-	"github.com/livekit/livekit-server/pkg/relay"
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/rpc"
+	"github.com/livekit/livekit-server/pkg/service"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/utils"
 	"github.com/livekit/protocol/utils/guid"
@@ -78,15 +78,15 @@ func main() {
 		StreamBufferSize: 1000,
 		ConnectAttempts:  3,
 	}
-	relayClient, err := relay.NewCloudRelaySignalClientFromTypedClient(localNode, roomName, bus, signalRelayConfig, client)
+	relayServiceClient, err := service.NewCloudRelayServiceSignalClientFromTypedClient(localNode, roomName, bus, signalRelayConfig, client)
 	if err != nil {
-		log.Fatalf("create relay client failed! %v", err)
+		log.Fatalf("create relay service client failed! %v", err)
 		os.Exit(1)
 	}
 
-	log.Printf("Broadcasting RoomOnline...\n")
+	log.Printf("Broadcasting RoomOnline for room %s...\n", roomName)
 
-	nodes, err := relayClient.RoomOnline(context.Background(), livekit.RoomName(roomName))
+	nodes, err := relayServiceClient.RoomOnline(context.Background(), livekit.RoomName(roomName))
 	if err != nil {
 		log.Fatalf("Send RoomOnline failed! %v", err)
 		os.Exit(1)
@@ -104,7 +104,7 @@ func main() {
 			sid := livekit.ParticipantID(guid.New(utils.ParticipantPrefix))
 			log.Printf("Trying to create relay signal to node: %s for participant: %s\n", string(toNode), string(sid))
 
-			pri := relay.ParticipantRelayInit{
+			pri := routing.ParticipantRelayInit{
 				RoomName:       roomName,
 				FromNode:       localNode,
 				ToNode:         toNode,

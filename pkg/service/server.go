@@ -49,6 +49,7 @@ type LivekitServer struct {
 	config       *config.Config
 	ioService    *IOInfoService
 	rtcService   *RTCService
+	relayService *RTCRelayService
 	agentService *AgentService
 	httpServer   *http.Server
 	promServer   *http.Server
@@ -70,6 +71,7 @@ func NewLivekitServer(conf *config.Config,
 	sipService *SIPService,
 	ioService *IOInfoService,
 	rtcService *RTCService,
+	rtcRelayService *RTCRelayService,
 	agentService *AgentService,
 	keyProvider auth.KeyProvider,
 	router routing.Router,
@@ -82,6 +84,7 @@ func NewLivekitServer(conf *config.Config,
 		config:       conf,
 		ioService:    ioService,
 		rtcService:   rtcService,
+		relayService: rtcRelayService,
 		agentService: agentService,
 		router:       router,
 		roomManager:  roomManager,
@@ -201,6 +204,13 @@ func (s *LivekitServer) Start() error {
 
 	if err := s.router.Start(); err != nil {
 		return err
+	}
+
+	if s.relayService != nil {
+		err := s.relayService.server.Start()
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := s.ioService.Start(); err != nil {
@@ -326,6 +336,9 @@ func (s *LivekitServer) Stop(force bool) {
 	}
 
 	s.router.Stop()
+	if s.relayService != nil {
+		s.relayService.server.Stop()
+	}
 	close(s.doneChan)
 
 	// wait for fully closed

@@ -8,7 +8,8 @@ option go_package = ".;rpc";
 
 import "options.proto";
 import "livekit_models.proto";
-import "livekit_internal.proto";
+//import "livekit_internal.proto";
+import "livekit_room.proto";
 import "livekit_rtc.proto";
 
 /*
@@ -67,13 +68,11 @@ service CloudRelayService {
 
 message StartRelaySession {
   string room_name = 1;
-  string id = 2;
-  string identity = 3;
-  string connection_id = 4;
+  string identity = 2;
+  string connection_id = 3;
   // if a client is reconnecting (i.e. resume instead of restart)
-  bool reconnect = 5;
-  string from_node = 6;
-  string region = 7;
+  bool reconnect = 4;
+  string participant_sid = 6;
   bool auto_subscribe = 9;
   bool hidden = 10;
   ClientInfo client = 11;
@@ -87,6 +86,7 @@ message StartRelaySession {
   ReconnectReason reconnect_reason = 17;
   optional bool subscriber_allow_pause = 18;
   bool disable_ice_lite = 19;
+  livekit.CreateRoomRequest create_room = 20;
 }
 
 message ForwardParticipant {
@@ -110,12 +110,13 @@ message RoomSignalRelayResponse {
 
 message RoomOnlineRequest {
   string room_name = 1;
-  Node node = 2;
+  string node_id = 2;
 }
 
 message RoomOnlineResponse {
   string room_name = 1;
   string node_id = 2;
+  bool exist = 3;
 }
 
 message RoomOfflineRequest {
@@ -126,6 +127,7 @@ message RoomOfflineRequest {
 message RoomOfflineResponse {
   string room_name = 1;
   string node_id = 2;
+  bool exist = 3;
 }
 
 // Relayed signal messages

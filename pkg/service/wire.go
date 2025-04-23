@@ -95,6 +95,8 @@ func InitializeServer(conf *config.Config, currentNode routing.LocalNode) (*Live
 		rpc.NewTypedParticipantClient,
 		rpc.NewTypedAgentDispatchInternalClient,
 		NewLocalRoomManager,
+		getRtcRelayConfig,
+		NewRTCRelayService,
 		NewTURNAuthHandler,
 		getTURNAuthHandlerFunc,
 		newInProcessTurnServer,
@@ -175,6 +177,16 @@ func createRedisClient(conf *config.Config) (redis.UniversalClient, error) {
 	return redisLiveKit.GetRedisClient(&conf.Redis)
 }
 
+//func createNatsClient(conf *config.Config) (*nats.Conn, error) {
+//	if !conf.RtcRelay.Enabled {
+//		return nil, nil
+//	}
+//	if !conf.RtcRelay.Nats.IsConfigured() {
+//		return nil, nil
+//	}
+//	return GetNatsClient(&conf.RtcRelay.Nats)
+//}
+
 func createStore(rc redis.UniversalClient) ObjectStore {
 	if rc != nil {
 		return NewRedisStore(rc)
@@ -249,6 +261,10 @@ func getRoomConfig(config *config.Config) config.RoomConfig {
 
 func getSignalRelayConfig(config *config.Config) config.SignalRelayConfig {
 	return config.SignalRelay
+}
+
+func getRtcRelayConfig(config *config.Config) config.RtcRelayConfig {
+	return config.RtcRelay
 }
 
 func getPSRPCConfig(config *config.Config) rpc.PSRPCConfig {

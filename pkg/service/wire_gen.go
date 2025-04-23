@@ -120,10 +120,7 @@ func InitializeServer(conf *config.Config, currentNode routing.LocalNode) (*Live
 	}
 	sipService := NewSIPService(sipConfig, nodeID, messageBus, sipClient, sipStore, roomService, telemetryService)
 	rtcService := NewRTCService(conf, roomAllocator, objectStore, router, currentNode, telemetryService)
-	agentService, err := NewAgentService(conf, currentNode, messageBus, keyProvider)
-	if err != nil {
-		return nil, err
-	}
+	rtcRelayConfig := getRtcRelayConfig(conf)
 	clientConfigurationManager := createClientConfiguration()
 	client, err := agent.NewAgentClient(messageBus)
 	if err != nil {
@@ -137,6 +134,14 @@ func InitializeServer(conf *config.Config, currentNode routing.LocalNode) (*Live
 	if err != nil {
 		return nil, err
 	}
+	rtcRelayService, err := NewRTCRelayService(rtcRelayConfig, currentNode, roomManager)
+	if err != nil {
+		return nil, err
+	}
+	agentService, err := NewAgentService(conf, currentNode, messageBus, keyProvider)
+	if err != nil {
+		return nil, err
+	}
 	signalServer, err := NewDefaultSignalServer(currentNode, messageBus, signalRelayConfig, router, roomManager)
 	if err != nil {
 		return nil, err
@@ -146,7 +151,7 @@ func InitializeServer(conf *config.Config, currentNode routing.LocalNode) (*Live
 	if err != nil {
 		return nil, err
 	}
-	livekitServer, err := NewLivekitServer(conf, roomService, agentDispatchService, egressService, ingressService, sipService, ioInfoService, rtcService, agentService, keyProvider, router, roomManager, signalServer, server, currentNode)
+	livekitServer, err := NewLivekitServer(conf, roomService, agentDispatchService, egressService, ingressService, sipService, ioInfoService, rtcService, rtcRelayService, agentService, keyProvider, router, roomManager, signalServer, server, currentNode)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +314,10 @@ func getRoomConfig(config2 *config.Config) config.RoomConfig {
 
 func getSignalRelayConfig(config2 *config.Config) config.SignalRelayConfig {
 	return config2.SignalRelay
+}
+
+func getRtcRelayConfig(config2 *config.Config) config.RtcRelayConfig {
+	return config2.RtcRelay
 }
 
 func getPSRPCConfig(config2 *config.Config) rpc.PSRPCConfig {

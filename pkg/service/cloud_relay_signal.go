@@ -1,11 +1,11 @@
-package relay
+package service
 
 import (
 	"context"
 	"github.com/livekit/livekit-server/pkg/config"
 	"github.com/livekit/livekit-server/pkg/routing"
-	rpc "github.com/livekit/livekit-server/pkg/rpc"
-	"github.com/livekit/livekit-server/pkg/service"
+	"github.com/livekit/livekit-server/pkg/rpc"
+	"github.com/livekit/livekit-server/pkg/telemetry/prometheus"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	lrpc "github.com/livekit/protocol/rpc"
@@ -22,9 +22,13 @@ import (
 type RelaySessionHandler interface {
 	Logger(ctx context.Context) logger.Logger
 
+	HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error
+
+	HandleRoomOffline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error
+
 	HandleRelaySession(
 		ctx context.Context,
-		//pi routing.ParticipantInit,
+		pi routing.ParticipantRelayInit,
 		connectionID livekit.ConnectionID,
 		requestSource routing.MessageSource,
 		responseSink routing.MessageSink,
@@ -34,84 +38,100 @@ type RelaySessionHandler interface {
 type defaultRelaySessionHandler struct {
 	currentNode routing.LocalNode
 	currentRoom livekit.RoomName
-	roomManager *service.RoomManager
+	roomManager *RoomManager
 }
 
 func (s *defaultRelaySessionHandler) Logger(ctx context.Context) logger.Logger {
 	return logger.GetLogger()
 }
 
+func (s *defaultRelaySessionHandler) HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error {
+	room, err := s.roomManager.GetRoomByName(context.Background(), roomName)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	defer room.Release()
+
+	return nil
+}
+
+func (s *defaultRelaySessionHandler) HandleRoomOffline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error {
+	room, err := s.roomManager.GetRoomByName(context.Background(), roomName)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	defer room.Release()
+
+	//s.roomManager.RemoveRemoteParticipantsFromNode(fromNode)
+
+	return nil
+}
+
 func (s *defaultRelaySessionHandler) HandleRelaySession(
 	ctx context.Context,
-	//pi routing.ParticipantInit,
+	pri routing.ParticipantRelayInit,
 	connectionID livekit.ConnectionID,
 	requestSource routing.MessageSource,
 	responseSink routing.MessageSink,
 ) error {
-	//	prometheus.IncrementParticipantRtcInit(1)
+	prometheus.IncrementParticipantRtcInit(1)
 
-	//rtcNode, err := s.router.GetNodeForRoom(ctx, livekit.RoomName(pi.CreateRoom.Name))
-	//if err != nil {
-	//	return err
-	//}
+	room := s.roomManager.GetRoom(context.Background(), livekit.RoomName(pri.RoomName))
+	if room == nil {
+		logger.Infow("HandleRelaySession: room not found", "room", pri.RoomName)
+		return ErrRoomNotFound
+	}
+
+	return s.roomManager.StartRelayInSession(ctx, pri, requestSource, responseSink, false)
+
+	//go func() {
+	//	defer func() {
+	//		requestSource.Close()
+	//	}()
 	//
-	//if livekit.NodeID(rtcNode.Id) != s.currentNode.NodeID() {
-	//	err = routing.ErrIncorrectRTCNode
-	//	logger.Errorw("called participant on incorrect node", err,
-	//		"rtcNode", rtcNode,
-	//	)
-	//	return err
-	//}
+	//	respTicker := time.NewTicker(5 * time.Second)
+	//	defer respTicker.Stop()
 	//
-	//return s.roomManager.StartSession(ctx, pi, requestSource, responseSink, false)
-	go func() {
-		defer func() {
-			requestSource.Close()
-		}()
-
-		respTicker := time.NewTicker(5 * time.Second)
-		defer respTicker.Stop()
-
-		for {
-			select {
-			case <-respTicker.C:
-				log.Printf("timed out while waiting for signal response")
-				return
-			case msg := <-requestSource.ReadChan():
-				if msg == nil {
-					log.Printf("No message! Close relay session's request channel")
-					return
-				}
-
-				req := msg.(*livekit.SignalRequest)
-				switch req.GetMessage().(type) {
-				case *livekit.SignalRequest_Offer:
-					log.Printf("Received offer")
-				case *livekit.SignalRequest_Answer:
-					log.Printf("Received answer")
-				case *livekit.SignalRequest_PingReq:
-					log.Printf("Received Request: %v", req)
-					respTicker.Stop()
-					respTicker = time.NewTicker(5 * time.Second)
-					go func() {
-						resMsg := livekit.SignalResponse_PongResp{PongResp: &livekit.Pong{
-							Timestamp: time.Now().UnixMilli(),
-						}}
-						resMessageOut := &livekit.SignalResponse{
-							Message: &resMsg,
-						}
-						err := responseSink.WriteMessage(resMessageOut)
-						if err != nil {
-							log.Printf("Error writing response: %v", err)
-						}
-						log.Printf("Response: %v", resMsg)
-					}()
-				}
-			}
-		}
-	}()
-
-	return nil
+	//	for {
+	//		select {
+	//		case <-respTicker.C:
+	//			log.Printf("timed out while waiting for signal response")
+	//			return
+	//		case msg := <-requestSource.ReadChan():
+	//			if msg == nil {
+	//				log.Printf("No message! Close relay session's request channel")
+	//				return
+	//			}
+	//
+	//			req := msg.(*livekit.SignalRequest)
+	//			switch req.GetMessage().(type) {
+	//			case *livekit.SignalRequest_Offer:
+	//				log.Printf("Received offer")
+	//			case *livekit.SignalRequest_Answer:
+	//				log.Printf("Received answer")
+	//			case *livekit.SignalRequest_PingReq:
+	//				log.Printf("Received Request: %v", req)
+	//				respTicker.Stop()
+	//				respTicker = time.NewTicker(5 * time.Second)
+	//				go func() {
+	//					resMsg := livekit.SignalResponse_PongResp{PongResp: &livekit.Pong{
+	//						Timestamp: time.Now().UnixMilli(),
+	//					}}
+	//					resMessageOut := &livekit.SignalResponse{
+	//						Message: &resMsg,
+	//					}
+	//					err := responseSink.WriteMessage(resMessageOut)
+	//					if err != nil {
+	//						log.Printf("Error writing response: %v", err)
+	//					}
+	//					log.Printf("Response: %v", resMsg)
+	//				}()
+	//			}
+	//		}
+	//	}
+	//}()
+	//
+	//return nil
 }
 
 //counterfeiter:generate . SignalClient
@@ -119,10 +139,10 @@ type CloudRelaySignalClient interface {
 	ActiveCount() int
 	RoomOnline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error)
 	RoomOffline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error)
-	StartParticipantRelaySignal(ctx context.Context, roomName livekit.RoomName, toNode livekit.NodeID, pri ParticipantRelayInit) (connectionID livekit.ConnectionID, reqSink routing.MessageSink, resSource routing.MessageSource, err error)
+	StartParticipantRelaySignal(ctx context.Context, roomName livekit.RoomName, toNode livekit.NodeID, pri routing.ParticipantRelayInit) (connectionID livekit.ConnectionID, reqSink routing.MessageSink, resSource routing.MessageSource, err error)
 }
 
-type cloudRelaySignalClient struct {
+type cloudRelayServiceSignalClient struct {
 	localNode livekit.NodeID
 	roomName  livekit.RoomName
 	config    config.SignalRelayConfig
@@ -130,9 +150,9 @@ type cloudRelaySignalClient struct {
 	active    atomic.Int32
 }
 
-func NewCloudRelaySignalClientFromTypedClient(nodeID livekit.NodeID, roomName livekit.RoomName, bus psrpc.MessageBus,
+func NewCloudRelayServiceSignalClientFromTypedClient(nodeID livekit.NodeID, roomName livekit.RoomName, bus psrpc.MessageBus,
 	config config.SignalRelayConfig, c rpc.TypedCloudRelayServiceClient) (CloudRelaySignalClient, error) {
-	return &cloudRelaySignalClient{
+	return &cloudRelayServiceSignalClient{
 		localNode: nodeID,
 		roomName:  roomName,
 		config:    config,
@@ -140,7 +160,7 @@ func NewCloudRelaySignalClientFromTypedClient(nodeID livekit.NodeID, roomName li
 	}, nil
 }
 
-func NewCloudRelaySignalClient(nodeID livekit.NodeID, roomName livekit.RoomName, bus psrpc.MessageBus,
+func NewCloudRelayServiceSignalClient(nodeID livekit.NodeID, roomName livekit.RoomName, bus psrpc.MessageBus,
 	config config.SignalRelayConfig) (CloudRelaySignalClient, error) {
 	c, err := rpc.NewTypedCloudRelayServiceClient(
 		nodeID, roomName, bus,
@@ -151,7 +171,7 @@ func NewCloudRelaySignalClient(nodeID livekit.NodeID, roomName livekit.RoomName,
 		return nil, err
 	}
 
-	return &cloudRelaySignalClient{
+	return &cloudRelayServiceSignalClient{
 		localNode: nodeID,
 		roomName:  roomName,
 		config:    config,
@@ -159,16 +179,14 @@ func NewCloudRelaySignalClient(nodeID livekit.NodeID, roomName livekit.RoomName,
 	}, nil
 }
 
-func (r *cloudRelaySignalClient) ActiveCount() int {
+func (r *cloudRelayServiceSignalClient) ActiveCount() int {
 	return int(r.active.Load())
 }
 
-func (r *cloudRelaySignalClient) RoomOnline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error) {
+func (r *cloudRelayServiceSignalClient) RoomOnline(ctx context.Context, roomName livekit.RoomName) (*[]livekit.NodeID, error) {
 	req := &rpc.RoomOnlineRequest{
 		RoomName: string(roomName),
-		Node: &livekit.Node{
-			Id: string(r.localNode),
-		},
+		NodeId:   string(r.localNode),
 	}
 	res, err := r.client.RoomOnline(context.Background(), rpc.RoomTopic("room.*"), req)
 	if err != nil {
@@ -178,28 +196,43 @@ func (r *cloudRelaySignalClient) RoomOnline(ctx context.Context, roomName liveki
 		return nil, err
 	}
 
-	n := make([]livekit.NodeID, 0)
-	for {
-		resp := <-res
-		if resp == nil {
-			logger.Debugw("RoomOnline response channel closed", "roomName", roomName)
-			break
-		}
+	nodes := make([]livekit.NodeID, 0)
+	timeout := time.After(15 * time.Second)
 
-		if resp.Result.RoomName == req.RoomName && resp.Result.NodeId != string(r.localNode) {
-			n = append(n, livekit.NodeID(resp.Result.NodeId))
+	for {
+		select {
+		case resp, ok := <-res:
+			if !ok {
+				// 通道已关闭
+				logger.Debugw("RoomOnline response channel closed", "roomName", roomName)
+				if len(nodes) == 0 {
+					return nil, ErrRoomNotFound
+				}
+				return &nodes, nil
+			}
+
+			if resp == nil {
+				continue
+			}
+
+			if resp.Result.RoomName == req.RoomName &&
+				resp.Result.NodeId != string(r.localNode) &&
+				resp.Result.Exist {
+				nodes = append(nodes, livekit.NodeID(resp.Result.NodeId))
+			}
+
+		case <-timeout:
+			// 15秒超时
+			logger.Debugw("RoomOnline no response timer", "roomName", roomName)
+			if len(nodes) == 0 {
+				return nil, ErrRoomNotFound
+			}
+			return &nodes, nil
 		}
 	}
-
-	//if len(n) == 0 {
-	//	return nil, service.ErrRoomNotFound
-	//} else {
-	//	return &n, nil
-	//}
-	return &n, nil
 }
 
-func (r *cloudRelaySignalClient) RoomOffline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error) {
+func (r *cloudRelayServiceSignalClient) RoomOffline(ctx context.Context, roomName livekit.RoomName) (*[]livekit.NodeID, error) {
 	req := &rpc.RoomOfflineRequest{
 		RoomName: string(roomName),
 		NodeId:   string(r.localNode),
@@ -212,27 +245,47 @@ func (r *cloudRelaySignalClient) RoomOffline(ctx context.Context, roomName livek
 		return nil, err
 	}
 
-	n := make([]livekit.NodeID, 0)
-	for {
-		resp := <-res
-		if resp == nil {
-			logger.Debugw("RoomOffline response channel closed", "roomName", roomName)
-			break
-		}
+	nodes := make([]livekit.NodeID, 0)
+	timeout := time.After(15 * time.Second)
 
-		if resp.Result.RoomName == req.RoomName && resp.Result.NodeId != string(r.localNode) {
-			n = append(n, livekit.NodeID(resp.Result.NodeId))
+	for {
+		select {
+		case resp, ok := <-res:
+			if !ok {
+				logger.Debugw("RoomOffline response channel closed", "roomName", roomName)
+				if len(nodes) == 0 {
+					return nil, ErrRoomNotFound
+				}
+				return &nodes, nil
+			}
+
+			if resp == nil {
+				continue
+			}
+
+			if resp.Result.RoomName == req.RoomName &&
+				resp.Result.NodeId != string(r.localNode) &&
+				resp.Result.Exist {
+				nodes = append(nodes, livekit.NodeID(resp.Result.NodeId))
+			}
+
+		case <-timeout:
+			// 15秒超时
+			logger.Debugw("RoomOffline no response timer", "roomName", roomName)
+			if len(nodes) == 0 {
+				return nil, ErrRoomNotFound
+			}
+			return &nodes, nil
 		}
 	}
 
-	return &n, nil
 }
 
-func (r *cloudRelaySignalClient) StartParticipantRelaySignal(
+func (r *cloudRelayServiceSignalClient) StartParticipantRelaySignal(
 	ctx context.Context,
 	roomName livekit.RoomName,
 	toNode livekit.NodeID,
-	pri ParticipantRelayInit,
+	pri routing.ParticipantRelayInit,
 ) (
 	connectionID livekit.ConnectionID,
 	reqSink routing.MessageSink,
@@ -269,7 +322,7 @@ func (r *cloudRelaySignalClient) StartParticipantRelaySignal(
 	err = stream.Send(&rpc.RoomSignalRelayRequest{StartRelaySession: srs})
 	if err != nil {
 		stream.Close(err)
-		log.Fatalf("failed to start cloud relay signal stream: %v", err)
+		log.Fatalf("failed to send RoomSignalRelayRequest: %v", err)
 		//prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
 		return
 	}
@@ -312,7 +365,7 @@ type CloudRelaySignalServer struct {
 func NewCloudRelaySignalServer(
 	nodeID livekit.NodeID,
 	roomName livekit.RoomName,
-	//region string,
+	region string,
 	bus psrpc.MessageBus,
 	config config.SignalRelayConfig,
 	sessionHandler RelaySessionHandler,
@@ -320,10 +373,10 @@ func NewCloudRelaySignalServer(
 	s, err := rpc.NewTypedCloudRelayServiceServer(
 		nodeID,
 		roomName,
-		&CloudRelayService{nodeID, sessionHandler, config},
+		&CloudRelayService{region, nodeID, sessionHandler, config},
 		bus,
-		//middleware.WithServerMetrics(lrpc.PSRPCMetricsObserver{}),
-		//psrpc.WithServerChannelSize(config.StreamBufferSize),
+		middleware.WithServerMetrics(lrpc.PSRPCMetricsObserver{}),
+		psrpc.WithServerChannelSize(config.StreamBufferSize),
 	)
 	if err != nil {
 		return nil, err
@@ -336,9 +389,9 @@ func NewDefaultCloudRelaySignalServer(
 	roomName livekit.RoomName,
 	bus psrpc.MessageBus,
 	config config.SignalRelayConfig,
-	roomManager *service.RoomManager,
+	roomManager *RoomManager,
 ) (r *CloudRelaySignalServer, err error) {
-	return NewCloudRelaySignalServer(currentNode.NodeID(), roomName, bus, config,
+	return NewCloudRelaySignalServer(currentNode.NodeID(), roomName, currentNode.Region(), bus, config,
 		&defaultRelaySessionHandler{currentNode, roomName, roomManager})
 }
 
