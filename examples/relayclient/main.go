@@ -116,7 +116,7 @@ func main() {
 				AdaptiveStream: false,
 				DisableICELite: true,
 			}
-			_, reqSink, resSource, err := relayClient.StartParticipantRelaySignal(context.Background(), roomName, toNode, pri)
+			_, reqSink, resSource, err := relayServiceClient.StartParticipantRelaySignal(context.Background(), roomName, toNode, pri)
 			if err != nil {
 				log.Fatalf("start relay signal client failed! %v", err)
 				os.Exit(1)
