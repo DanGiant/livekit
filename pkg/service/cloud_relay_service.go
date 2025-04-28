@@ -24,18 +24,13 @@ func (s *CloudRelayService) RoomOnline(ctx context.Context, req *rpc.RoomOnlineR
 	fmt.Printf("Receive RoomOnline request for room: %s from node:%s\n", req.RoomName, req.NodeId)
 
 	err := s.sessionHandler.HandleRoomOnline(ctx, livekit.RoomName(req.RoomName), livekit.NodeID(req.NodeId))
-	if err != nil {
+	if err == nil {
 		return &rpc.RoomOnlineResponse{
 			RoomName: req.RoomName,
 			NodeId:   string(s.nodeID),
-			Exist:    false,
 		}, nil
 	} else {
-		return &rpc.RoomOnlineResponse{
-			RoomName: req.RoomName,
-			NodeId:   string(s.nodeID),
-			Exist:    true,
-		}, nil
+		return nil, err
 	}
 }
 
@@ -46,14 +41,9 @@ func (s *CloudRelayService) RoomOffline(ctx context.Context, req *rpc.RoomOfflin
 		return &rpc.RoomOfflineResponse{
 			RoomName: req.RoomName,
 			NodeId:   string(s.nodeID),
-			Exist:    false,
 		}, nil
 	} else {
-		return &rpc.RoomOfflineResponse{
-			RoomName: req.RoomName,
-			NodeId:   string(s.nodeID),
-			Exist:    true,
-		}, nil
+		return nil, err
 	}
 }
 

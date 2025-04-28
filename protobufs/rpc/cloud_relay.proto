@@ -116,7 +116,7 @@ message RoomOnlineRequest {
 message RoomOnlineResponse {
   string room_name = 1;
   string node_id = 2;
-  bool exist = 3;
+//  bool exist = 3;
 }
 
 message RoomOfflineRequest {
@@ -127,7 +127,7 @@ message RoomOfflineRequest {
 message RoomOfflineResponse {
   string room_name = 1;
   string node_id = 2;
-  bool exist = 3;
+//  bool exist = 3;
 }
 
 // Relayed signal messages

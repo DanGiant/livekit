@@ -211,13 +211,12 @@ func (r *cloudRelayServiceSignalClient) RoomOnline(ctx context.Context, roomName
 				return &nodes, nil
 			}
 
-			if resp == nil {
+			if resp == nil || resp.Result == nil {
 				continue
 			}
 
 			if resp.Result.RoomName == req.RoomName &&
-				resp.Result.NodeId != string(r.localNode) &&
-				resp.Result.Exist {
+				resp.Result.NodeId != string(r.localNode) {
 				nodes = append(nodes, livekit.NodeID(resp.Result.NodeId))
 			}
 
@@ -264,8 +263,7 @@ func (r *cloudRelayServiceSignalClient) RoomOffline(ctx context.Context, roomNam
 			}
 
 			if resp.Result.RoomName == req.RoomName &&
-				resp.Result.NodeId != string(r.localNode) &&
-				resp.Result.Exist {
+				resp.Result.NodeId != string(r.localNode) {
 				nodes = append(nodes, livekit.NodeID(resp.Result.NodeId))
 			}
 
