@@ -207,10 +207,12 @@ func (s *LivekitServer) Start() error {
 	}
 
 	if s.relayService != nil {
-		err := s.relayService.server.Start()
+		err := s.relayService.signalServer.Start()
 		if err != nil {
 			return err
 		}
+
+		s.roomManager.relaySignalClient = s.relayService.signalClient
 	}
 
 	if err := s.ioService.Start(); err != nil {
@@ -337,7 +339,8 @@ func (s *LivekitServer) Stop(force bool) {
 
 	s.router.Stop()
 	if s.relayService != nil {
-		s.relayService.server.Stop()
+		s.relayService.signalServer.Stop()
+		s.relayService.relaySvcClient.Close()
 	}
 	close(s.doneChan)
 

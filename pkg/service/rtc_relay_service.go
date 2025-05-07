@@ -15,10 +15,12 @@ var ErrRtcRelayNotEnabled = errors.New("RTC relay is not enabled")
 var ErrNatsNotConfigured = errors.New("Nats is not configured")
 
 type RTCRelayService struct {
-	natsConn *nats.Conn
-	bus      psrpc.MessageBus
-	server   *CloudRelaySignalServer
-	client   rpc.TypedCloudRelayServiceClient
+	natsConn     *nats.Conn
+	bus          psrpc.MessageBus
+	signalServer *CloudRelaySignalServer
+	signalClient *CloudRelaySignalClient
+
+	relaySvcClient rpc.TypedCloudRelayServiceClient
 }
 
 func getNatsConnection(conf *config.NatsConfig) (*nats.Conn, error) {
@@ -65,20 +67,28 @@ func NewRTCRelayService(conf config.RtcRelayConfig, node routing.LocalNode, room
 		StreamBufferSize: 1000,
 		ConnectAttempts:  3,
 	}
-	server, err := NewDefaultCloudRelaySignalServer(node, roomName, bus, signalRelayConfig, roomManager)
+	signalServer, err := NewDefaultCloudRelaySignalServer(node, roomName, bus, signalRelayConfig, roomManager)
 	if err != nil {
 		return nil, err
 	}
 
-	client, err := rpc.NewTypedCloudRelayServiceClient(node.NodeID(), roomName, bus)
+	// relay service client
+	relaySvcClient, err := rpc.NewTypedCloudRelayServiceClient(node.NodeID(), roomName, bus)
 	if err != nil {
+		return nil, err
+	}
+
+	signalClient, err := NewCloudRelayServiceSignalClientFromTypedClient(node.NodeID(), roomName, bus, signalRelayConfig, relaySvcClient)
+	if err != nil {
+		//log.Fatalf("create relay service client failed! %v", err)
 		return nil, err
 	}
 
 	return &RTCRelayService{
-		natsConn: natsConn,
-		bus:      bus,
-		server:   server,
-		client:   client,
+		natsConn:       natsConn,
+		bus:            bus,
+		signalServer:   signalServer,
+		signalClient:   &signalClient,
+		relaySvcClient: relaySvcClient,
 	}, nil
 }
