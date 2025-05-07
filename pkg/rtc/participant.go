@@ -165,6 +165,7 @@ type ParticipantParams struct {
 	DatachannelSlowThreshold       int
 	FireOnTrackBySdp               bool
 	DisableCodecRegression         bool
+	IsRemoteRelay                  bool
 }
 
 type ParticipantImpl struct {
@@ -185,6 +186,8 @@ type ParticipantImpl struct {
 
 	grants      atomic.Pointer[auth.ClaimGrants]
 	isPublisher atomic.Bool
+
+	isRemoteRelay atomic.Bool
 
 	sessionStartRecorded atomic.Bool
 	lastActiveAt         atomic.Pointer[time.Time]
@@ -264,6 +267,9 @@ type ParticipantImpl struct {
 	// loggers for publisher and subscriber
 	pubLogger logger.Logger
 	subLogger logger.Logger
+
+	// loggers for relay
+	relayLogger logger.Logger
 }
 
 func NewParticipant(params ParticipantParams) (*ParticipantImpl, error) {
@@ -297,6 +303,7 @@ func NewParticipant(params ParticipantParams) (*ParticipantImpl, error) {
 		connectionQuality: livekit.ConnectionQuality_EXCELLENT,
 		pubLogger:         params.Logger.WithComponent(sutils.ComponentPub),
 		subLogger:         params.Logger.WithComponent(sutils.ComponentSub),
+		relayLogger:       params.Logger.WithComponent(sutils.ComponentRelay),
 	}
 	if !params.DisableSupervisor {
 		p.supervisor = supervisor.NewParticipantSupervisor(supervisor.ParticipantSupervisorParams{Logger: params.Logger})
@@ -309,6 +316,7 @@ func NewParticipant(params ParticipantParams) (*ParticipantImpl, error) {
 	p.grants.Store(params.Grants.Clone())
 	p.SetResponseSink(params.Sink)
 	p.setupEnabledCodecs(params.PublishEnabledCodecs, params.SubscribeEnabledCodecs, params.ClientConf.GetDisabledCodecs())
+	p.isRemoteRelay.Store(params.IsRemoteRelay)
 
 	if p.supervisor != nil {
 		p.supervisor.OnPublicationError(p.onPublicationError)
@@ -362,6 +370,10 @@ func (p *ParticipantImpl) Identity() livekit.ParticipantIdentity {
 	return p.params.Identity
 }
 
+func (p *ParticipantImpl) Name() livekit.ParticipantName {
+	return p.params.Name
+}
+
 func (p *ParticipantImpl) State() livekit.ParticipantInfo_State {
 	return p.state.Load().(livekit.ParticipantInfo_State)
 }
@@ -378,6 +390,10 @@ func (p *ParticipantImpl) IsRecorder() bool {
 func (p *ParticipantImpl) IsAgent() bool {
 	grants := p.grants.Load()
 	return grants.GetParticipantKind() == livekit.ParticipantInfo_AGENT || grants.Video.Agent
+}
+
+func (p *ParticipantImpl) IsRemoteRelay() bool {
+	return p.isRemoteRelay.Load()
 }
 
 func (p *ParticipantImpl) IsDependent() bool {

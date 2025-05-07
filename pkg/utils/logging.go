@@ -25,4 +25,6 @@ const (
 	ComponentSFU       = "sfu"
 	// transport subcomponents
 	ComponentCongestionControl = "cc"
+	// relay subcomponents
+	ComponentRelay = "relay"
 )

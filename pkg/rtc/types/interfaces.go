@@ -264,6 +264,7 @@ func (s SignallingCloseReason) String() string {
 type Participant interface {
 	ID() livekit.ParticipantID
 	Identity() livekit.ParticipantIdentity
+	Name() livekit.ParticipantName
 	State() livekit.ParticipantInfo_State
 	ConnectedAt() time.Time
 	CloseReason() ParticipantCloseReason
@@ -271,6 +272,7 @@ type Participant interface {
 	IsRecorder() bool
 	IsDependent() bool
 	IsAgent() bool
+	IsRemoteRelay() bool
 
 	CanSkipBroadcast() bool
 	Version() utils.TimedVersion

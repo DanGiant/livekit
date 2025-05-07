@@ -468,6 +468,7 @@ func (r *RoomManager) StartSession(
 		DataChannelMaxBufferedAmount: r.config.RTC.DataChannelMaxBufferedAmount,
 		DatachannelSlowThreshold:     r.config.RTC.DatachannelSlowThreshold,
 		FireOnTrackBySdp:             true,
+		IsRemoteRelay:                false,
 	})
 	if err != nil {
 		return err
@@ -752,6 +753,7 @@ func (r *RoomManager) StartRelayInSession(
 		DataChannelMaxBufferedAmount: r.config.RTC.DataChannelMaxBufferedAmount,
 		DatachannelSlowThreshold:     r.config.RTC.DatachannelSlowThreshold,
 		FireOnTrackBySdp:             true,
+		IsRemoteRelay:                true,
 	})
 	if err != nil {
 		return err

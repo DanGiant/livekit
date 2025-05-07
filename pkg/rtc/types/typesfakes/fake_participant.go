@@ -838,6 +838,10 @@ func (fake *FakeParticipant) ID() livekit.ParticipantID {
 	return fakeReturns.result1
 }
 
+func (fake *FakeParticipant) Name() livekit.ParticipantName {
+	return livekit.ParticipantName("Name")
+}
+
 func (fake *FakeParticipant) IDCallCount() int {
 	fake.iDMutex.RLock()
 	defer fake.iDMutex.RUnlock()
@@ -942,6 +946,10 @@ func (fake *FakeParticipant) IsAgent() bool {
 		return ret.result1
 	}
 	return fakeReturns.result1
+}
+
+func (fake *FakeParticipant) IsRemoteRelay() bool {
+	return false
 }
 
 func (fake *FakeParticipant) IsAgentCallCount() int {
