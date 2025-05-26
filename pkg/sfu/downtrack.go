@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/pion/webrtc/v4/pkg/media"
 	"io"
 	"math"
 	"math/rand"
@@ -48,6 +49,16 @@ import (
 	"github.com/livekit/livekit-server/pkg/sfu/rtpstats"
 	"github.com/livekit/livekit-server/pkg/sfu/utils"
 )
+
+type SampleWriteOptions struct {
+	AudioLevel *uint8
+}
+
+type LocalTrackSender interface {
+	IsBound() bool
+	WriteRTP(p *rtp.Packet, opts *SampleWriteOptions) error
+	WriteSample(sample media.Sample, opts *SampleWriteOptions) error
+}
 
 // TrackSender defines an interface send media to remote peer
 type TrackSender interface {

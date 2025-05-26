@@ -17,6 +17,7 @@ package rtc
 import (
 	"context"
 	"fmt"
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"math"
 	"slices"
 	"sort"
@@ -127,7 +128,8 @@ type Room struct {
 	agentParticpants          map[livekit.ParticipantIdentity]*agentJob
 	bufferFactory             *buffer.FactoryOfBufferFactory
 
-	remoteParticipants map[livekit.ParticipantIdentity]types.Participant
+	//remoteParticipants map[livekit.ParticipantIdentity]types.Participant
+	remoteRooms map[livekit.NodeID]*RemoteRoom
 
 	// batch update participant info for non-publishers
 	batchedUpdates   map[livekit.ParticipantIdentity]*participantUpdate
@@ -270,6 +272,7 @@ func NewRoom(
 		agentParticpants:                     make(map[livekit.ParticipantIdentity]*agentJob),
 		bufferFactory:                        buffer.NewFactoryOfBufferFactory(config.Receiver.PacketBufferSizeVideo, config.Receiver.PacketBufferSizeAudio),
 		batchedUpdates:                       make(map[livekit.ParticipantIdentity]*participantUpdate),
+		remoteRooms:                          make(map[livekit.NodeID]*RemoteRoom),
 		closed:                               make(chan struct{}),
 		trailer:                              []byte(utils.RandomSecret()),
 		disconnectSignalOnResumeParticipants: make(map[livekit.ParticipantIdentity]time.Time),
@@ -329,10 +332,80 @@ func (r *Room) GetParticipant(identity livekit.ParticipantIdentity) types.LocalP
 	return r.participants[identity]
 }
 
-func (r *Room) GetRemoteParticipant(identity livekit.ParticipantIdentity) types.Participant {
+func (r *Room) AddRemoteRoom(remoteRoom *RemoteRoom) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	remoteRoom.OnParticipantStateChange(func(p types.LocalParticipant, state livekit.ParticipantInfo_State) {
+		r.Logger.Infow("remote room: OnParticipantStateChange", "ParticipantID", p.ID(),
+			"state", state.String())
+
+		if !p.IsRemoteRelay() {
+			go func() {
+				if state == livekit.ParticipantInfo_ACTIVE && !p.IsRecorder() && !p.IsDependent() {
+					r.Logger.Infow("remote room: OnParticipantStateChange, AddParticipant", "ParticipantID", p.ID(),
+						"state", state.String())
+					remoteRoom.AddParticipant(p.ID())
+					return
+				}
+
+				if state == livekit.ParticipantInfo_DISCONNECTED {
+					r.Logger.Infow("remote room: OnParticipantStateChange, RemoveParticipant", "ParticipantID", p.ID(),
+						"state", state.String())
+					remoteRoom.RemoveParticipant(p.ID())
+					return
+				}
+			}()
+		}
+	})
+
+	remoteRoom.AddOnClose(func() {
+		_, err := r.RemoveRemoteRoom(remoteRoom.GetRemoteNodeID())
+		if err != nil {
+			r.Logger.Errorw("remove remote room failed!", err,
+				"remoteNodeID", remoteRoom.GetRemoteNodeID())
+		}
+	})
+
+	r.remoteRooms[remoteRoom.GetRemoteNodeID()] = remoteRoom
+}
+
+func (r *Room) RemoveRemoteRoom(remoteNodeId livekit.NodeID) (*RemoteRoom, error) {
+	r.lock.Lock()
+	remoteRoom, ok := r.remoteRooms[remoteNodeId]
+	if ok {
+		delete(r.remoteRooms, remoteNodeId)
+	}
+	r.lock.Unlock()
+
+	if !ok {
+		return nil, relay.ErrNoRemoteRoom
+	} else {
+		return remoteRoom, nil
+	}
+}
+
+func (r *Room) GetRemoteRoom(remoteNodeId livekit.NodeID) (*RemoteRoom, error) {
+	r.lock.RLock()
+	remoteRoom, ok := r.remoteRooms[remoteNodeId]
+	r.lock.RUnlock()
+
+	if !ok {
+		return nil, relay.ErrNoRemoteRoom
+	} else {
+		return remoteRoom, nil
+	}
+}
+
+func (r *Room) GetRemoteRooms() []*RemoteRoom {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
-	return r.remoteParticipants[identity]
+
+	remoteRooms := make([]*RemoteRoom, 0, len(r.remoteRooms))
+	for _, remoteRoom := range r.remoteRooms {
+		remoteRooms = append(remoteRooms, remoteRoom)
+	}
+	return remoteRooms
 }
 
 func (r *Room) GetParticipantByID(participantID livekit.ParticipantID) types.LocalParticipant {
@@ -356,7 +429,19 @@ func (r *Room) GetParticipants() []types.LocalParticipant {
 }
 
 func (r *Room) GetLocalParticipants() []types.LocalParticipant {
-	return r.GetParticipants()
+	//return r.GetParticipants()
+
+	r.lock.RLock()
+	participants := r.participants
+	r.lock.RUnlock()
+
+	localParticipants := make([]types.LocalParticipant, 0, len(participants))
+	for _, p := range participants {
+		if !p.IsRemoteRelay() {
+			localParticipants = append(localParticipants, p)
+		}
+	}
+	return localParticipants
 }
 
 func (r *Room) GetParticipantCount() int {
@@ -453,10 +538,23 @@ func (r *Room) Join(participant types.LocalParticipant, requestSource routing.Me
 	}
 
 	participant.OnStateChange(func(p types.LocalParticipant, state livekit.ParticipantInfo_State) {
+		p.GetLogger().Infow("participant onStateChange", "ParticipantID", p.ID(),
+			"NewState", state.String())
+
 		if r.onParticipantChanged != nil {
 			r.onParticipantChanged(p)
 		}
 		r.broadcastParticipantState(p, broadcastOptions{skipSource: true})
+
+		remoteRooms := r.GetRemoteRooms()
+		for _, remoteRoom := range remoteRooms {
+			p.GetLogger().Infow("call onParticipantStateChange", "ParticipantID", p.ID(),
+				"NewState", p.State().String())
+			onParticipantStateChange := remoteRoom.GetOnParticipantStateChange()
+			if onParticipantStateChange != nil {
+				go onParticipantStateChange(p, state)
+			}
+		}
 
 		if state == livekit.ParticipantInfo_ACTIVE {
 			// subscribe participant to existing published tracks
@@ -735,14 +833,17 @@ func (r *Room) RemoveParticipant(identity livekit.ParticipantIdentity, pID livek
 	p.OnTrackUpdated(nil)
 	p.OnTrackPublished(nil)
 	p.OnTrackUnpublished(nil)
-	p.OnStateChange(nil)
-	p.OnParticipantUpdate(nil)
+	//p.OnStateChange(nil)
+	//p.OnParticipantUpdate(nil)
 	p.OnDataPacket(nil)
 	p.OnMetrics(nil)
 	p.OnSubscribeStatusChanged(nil)
 
 	// close participant as well
 	_ = p.Close(true, reason, false)
+
+	p.OnStateChange(nil)
+	p.OnParticipantUpdate(nil)
 
 	r.leftAt.Store(time.Now().Unix())
 
@@ -930,6 +1031,12 @@ func (r *Room) Close(reason types.ParticipantCloseReason) {
 	r.Logger.Infow("closing room")
 	for _, p := range r.GetParticipants() {
 		_ = p.Close(true, reason, false)
+	}
+
+	// close all remote rooms
+	remoteRooms := r.GetRemoteRooms()
+	for _, remoteRoom := range remoteRooms {
+		remoteRoom.Close()
 	}
 
 	r.protoProxy.Stop()

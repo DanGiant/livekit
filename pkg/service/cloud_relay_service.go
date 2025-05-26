@@ -2,15 +2,14 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"github.com/livekit/livekit-server/pkg/config"
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/rpc"
 	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/protocol/logger"
 	"github.com/livekit/psrpc"
 	"github.com/livekit/psrpc/pkg/metadata"
 	"github.com/pkg/errors"
-	"log"
 )
 
 type CloudRelayService struct {
@@ -21,21 +20,33 @@ type CloudRelayService struct {
 }
 
 func (s *CloudRelayService) RoomOnline(ctx context.Context, req *rpc.RoomOnlineRequest) (*rpc.RoomOnlineResponse, error) {
-	fmt.Printf("Receive RoomOnline request for room: %s from node:%s\n", req.RoomName, req.NodeId)
+	logger.Infow("receive RoomOnline request", "RoomName", req.RoomName, "RemoteNodeID", req.NodeId)
 
-	err := s.sessionHandler.HandleRoomOnline(ctx, livekit.RoomName(req.RoomName), livekit.NodeID(req.NodeId))
+	err := s.sessionHandler.HandleRoomOnline(ctx, livekit.RoomName(req.RoomName), livekit.NodeID(req.NodeId), req.IsServerNode)
 	if err == nil {
+		logger.Infow("handle RoomOnline request success",
+			"RoomName", req.RoomName, "RemoteNodeID", req.NodeId)
+
 		return &rpc.RoomOnlineResponse{
 			RoomName: req.RoomName,
 			NodeId:   string(s.nodeID),
 		}, nil
 	} else {
+		if errors.Is(err, ErrRoomNotFound) {
+			logger.Infow("handle RoomOnline request but find no local room",
+				"RoomName", req.RoomName, "RemoteNodeID", req.NodeId)
+		} else {
+			logger.Errorw("handle RoomOnline request failed", err,
+				"RoomName", req.RoomName, "RemoteNodeID", req.NodeId)
+		}
+
 		return nil, err
 	}
 }
 
 func (s *CloudRelayService) RoomOffline(ctx context.Context, req *rpc.RoomOfflineRequest) (*rpc.RoomOfflineResponse, error) {
-	fmt.Printf("Receive RoomOffline request for room: %s from node:%s\n", req.RoomName, req.NodeId)
+	logger.Infow("Receive RoomOffline request", "RoomName", req.RoomName, "RemoteNodeID", req.NodeId)
+
 	err := s.sessionHandler.HandleRoomOffline(ctx, livekit.RoomName(req.RoomName), livekit.NodeID(req.NodeId))
 	if err != nil {
 		return &rpc.RoomOfflineResponse{
@@ -50,7 +61,7 @@ func (s *CloudRelayService) RoomOffline(ctx context.Context, req *rpc.RoomOfflin
 func (s *CloudRelayService) RoomSignalRelay(stream psrpc.ServerStream[*rpc.RoomSignalRelayResponse, *rpc.RoomSignalRelayRequest]) error {
 	req, ok := <-stream.Channel()
 	if !ok {
-		log.Fatalf("failed to read channel")
+		logger.Infow("failed to read channel")
 		return nil
 	}
 

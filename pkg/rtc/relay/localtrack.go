@@ -17,6 +17,7 @@ package relay
 import (
 	"context"
 	"errors"
+	"github.com/livekit/livekit-server/pkg/sfu"
 	"io"
 	"math/rand"
 	"strings"
@@ -47,9 +48,9 @@ var (
 	errOutOfOrderSample      = errors.New("out-of-order sample")
 )
 
-type SampleWriteOptions struct {
-	AudioLevel *uint8
-}
+//type SampleWriteOptions struct {
+//	AudioLevel *uint8
+//}
 
 // LocalTrack is a local track that simplifies writing samples.
 // It handles timing and publishing of things, so as long as a SampleProvider is provided, the class takes care of
@@ -179,13 +180,19 @@ func (s *LocalTrack) IsBound() bool {
 
 // Bind is an interface for TrackLocal, not for external consumption
 func (s *LocalTrack) Bind(t webrtc.TrackLocalContext) (webrtc.RTPCodecParameters, error) {
+	s.logger.Infow("LocalTrack Bind", "LocalTrackCodec", s.Codec(),
+		"ContextCodecs", t.CodecParameters())
+
 	codec, err := s.rtpTrack.Bind(t)
 	if err != nil {
+		s.logger.Errorw("LocalTrack Bind failed", err, "Codec", codec.MimeType)
 		return codec, err
 	}
+	s.logger.Infow("LocalTrack Bind codec success", "Codec", codec.MimeType)
 
 	payloader, err := payloaderForCodec(codec.RTPCodecCapability)
 	if err != nil {
+		s.logger.Errorw("LocalTrack Bind failed for no payloader", err)
 		return codec, err
 	}
 
@@ -218,6 +225,9 @@ func (s *LocalTrack) Bind(t webrtc.TrackLocalContext) (webrtc.RTPCodecParameters
 	onBind := s.onBind
 	provider := s.provider
 	onWriteComplete := s.onWriteComplete
+
+	s.logger.Infow("LocalTrack Bind set bound true!!!")
+
 	s.bound.Store(true)
 	s.lock.Unlock()
 
@@ -237,9 +247,15 @@ func (s *LocalTrack) Bind(t webrtc.TrackLocalContext) (webrtc.RTPCodecParameters
 
 // Unbind is an interface for TrackLocal, not for external consumption
 func (s *LocalTrack) Unbind(t webrtc.TrackLocalContext) error {
+
+	s.logger.Infow("LocalTrack Unbind")
+
 	s.lock.Lock()
 	provider := s.provider
 	onUnbind := s.onUnbind
+
+	s.logger.Infow("LocalTrack Unbind set bound false!!!")
+
 	s.bound.Store(false)
 	cancel := s.cancelWrite
 	s.lock.Unlock()
@@ -302,7 +318,7 @@ func (s *LocalTrack) OnUnbind(f func()) {
 	s.lock.Unlock()
 }
 
-func (s *LocalTrack) WriteRTP(p *rtp.Packet, opts *SampleWriteOptions) error {
+func (s *LocalTrack) WriteRTP(p *rtp.Packet, opts *sfu.SampleWriteOptions) error {
 	s.lock.RLock()
 	transceiver := s.transceiver
 	ssrcAcked := s.ssrcAcked
@@ -340,7 +356,7 @@ func (s *LocalTrack) WriteRTP(p *rtp.Packet, opts *SampleWriteOptions) error {
 	return s.rtpTrack.WriteRTP(p)
 }
 
-func (s *LocalTrack) WriteSample(sample media.Sample, opts *SampleWriteOptions) error {
+func (s *LocalTrack) WriteSample(sample media.Sample, opts *sfu.SampleWriteOptions) error {
 	s.lock.Lock()
 	if s.packetizer == nil {
 		s.lock.Unlock()
@@ -594,10 +610,10 @@ func (s *LocalTrack) writeWorker(provider SampleProvider, onComplete func()) {
 		}
 
 		if !s.muted.Load() {
-			var opts *SampleWriteOptions
+			var opts *sfu.SampleWriteOptions
 			if isAudioProvider {
 				level := audioProvider.CurrentAudioLevel()
-				opts = &SampleWriteOptions{
+				opts = &sfu.SampleWriteOptions{
 					AudioLevel: &level,
 				}
 			}

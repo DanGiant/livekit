@@ -23,11 +23,14 @@ const (
 	trackPublishTimeout = 10 * time.Second
 )
 
+var (
+	relayClientInterval = 3 * time.Second
+)
+
 type ClientParticipant interface {
 	SID() string
 	Identity() string
 	Name() string
-	//Kind() ParticipantKind
 	IsSpeaking() bool
 	AudioLevel() float32
 	TrackPublications() []TrackPublication
@@ -39,6 +42,7 @@ type ClientParticipant interface {
 	Attributes() map[string]string
 	GetTrackPublication(source livekit.TrackSource) TrackPublication
 	Permissions() *livekit.ParticipantPermission
+	Close()
 
 	setAudioLevel(level float32)
 	setIsSpeaking(speaking bool)
@@ -99,12 +103,6 @@ func (p *baseParticipant) Name() string {
 	return p.name
 }
 
-//func (p *baseParticipant) Kind() ParticipantKind {
-//	p.lock.RLock()
-//	defer p.lock.RUnlock()
-//	return ParticipantKind(p.info.GetKind())
-//}
-
 func (p *baseParticipant) Metadata() string {
 	p.lock.RLock()
 	defer p.lock.RUnlock()
@@ -125,6 +123,10 @@ func (p *baseParticipant) Permissions() *livekit.ParticipantPermission {
 		return proto.Clone(perm).(*livekit.ParticipantPermission)
 	}
 	return nil
+}
+
+func (p *baseParticipant) Close() {
+
 }
 
 func (p *baseParticipant) IsSpeaking() bool {
@@ -267,39 +269,33 @@ func (p *baseParticipant) getPublication(sid string) TrackPublication {
 //-------------------------------------------------------
 
 type RelayParticipantParams struct {
-	Logger     logger.Logger
-	RoomName   livekit.RoomName
-	NodeID     livekit.NodeID
-	ServerInfo *livekit.ServerInfo
-
-	//ReqSink      routing.MessageSink
-	//ResSource    routing.MessageSource
-	SignalClient *RelaySignalClient
+	Logger        logger.Logger
+	Configuration webrtc.Configuration
+	RoomName      livekit.RoomName
+	NodeID        livekit.NodeID
+	ServerInfo    *livekit.ServerInfo
+	SignalClient  *RelaySignalClient
 }
 
 type RelayParticipant struct {
 	baseParticipant
 
+	params                 RelayParticipantParams
 	logger                 logger.Logger
 	roomName               livekit.RoomName
 	nodeID                 livekit.NodeID
 	subscriptionPermission *livekit.SubscriptionPermission
 	serverInfo             *livekit.ServerInfo
+	closeCh                chan struct{}
+	doneCh                 chan struct{}
 
 	client *RelaySignalClient
 	engine *RelayRTCEngine
 
-	//rpcPendingAcks      *sync.Map
-	//rpcPendingResponses *sync.Map
+	onClose []func()
 }
 
 func NewRelayParticipant(params RelayParticipantParams) *RelayParticipant {
-	//relaySignalClient := NewRelaySignalClient(RelaySignalClientParams{
-	//	logger:    params.Logger,
-	//	reqSink:   params.ReqSink,
-	//	resSource: params.ResSource,
-	//})
-
 	rtcEngine := NewRelayRTCEngine(RelayRTCEngineParams{
 		logger:       params.Logger,
 		signalClient: params.SignalClient,
@@ -307,24 +303,82 @@ func NewRelayParticipant(params RelayParticipantParams) *RelayParticipant {
 
 	p := &RelayParticipant{
 		baseParticipant: *newBaseParticipant( /*roomcallback*/ ),
+		params:          params,
 		logger:          params.Logger,
 		roomName:        params.RoomName,
 		nodeID:          params.NodeID,
 		client:          params.SignalClient,
 		engine:          rtcEngine,
 		serverInfo:      params.ServerInfo,
+		closeCh:         make(chan struct{}),
+		doneCh:          make(chan struct{}),
+		onClose:         make([]func(), 0),
 
 		subscriptionPermission: &livekit.SubscriptionPermission{
 			AllParticipants: true,
 		},
-		//rpcPendingAcks:      &sync.Map{},
-		//rpcPendingResponses: &sync.Map{},
 	}
 
-	//engine.OnRpcAck = p.handleIncomingRpcAck
-	//engine.OnRpcResponse = p.handleIncomingRpcResponse
-
 	return p
+}
+
+func (m *RelayParticipant) GetLogger() logger.Logger {
+	return m.logger
+}
+
+func (m *RelayParticipant) DestNodeID() livekit.NodeID {
+	return m.nodeID
+}
+
+func (m *RelayParticipant) AddOnClose(f func()) {
+	if f == nil {
+		return
+	}
+
+	m.lock.Lock()
+	m.onClose = append(m.onClose, f)
+	m.lock.Unlock()
+}
+
+func (m *RelayParticipant) IsClosed() bool {
+	select {
+	case <-m.closeCh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *RelayParticipant) Close() {
+	if p.IsClosed() {
+		p.logger.Debugw("relay participant already closed!", "destNodeID", p.DestNodeID(),
+			"Name", p.Name())
+		return
+	}
+
+	p.logger.Debugw("closing relay participant", "destNodeID", p.DestNodeID(),
+		"Name", p.Name())
+
+	p.lock.Lock()
+	close(p.closeCh)
+	p.lock.Unlock()
+
+	// wait for relayClientWorker routine done
+	<-p.doneCh
+
+	// close all relay tracks
+	p.client.Stop()
+	p.engine.Close()
+
+	p.lock.Lock()
+	onclose := p.onClose
+	p.onClose = make([]func(), 0)
+	p.lock.Unlock()
+
+	// notify all registered onClose
+	for _, f := range onclose {
+		f()
+	}
 }
 
 func (p *RelayParticipant) Start() error {
@@ -332,17 +386,69 @@ func (p *RelayParticipant) Start() error {
 	iceServers[0] = &livekit.ICEServer{
 		Urls: []string{"stun:stun.l.google.com:19302"},
 	}
-	err := p.engine.configure(iceServers)
+	err := p.engine.configure(p.params.Configuration)
 	if err != nil {
 		return errors.Wrap(err, "failed to configure IRC")
 	}
 
+	p.engine.OnDisconnected = func(reason DisconnectionReason) {
+		p.logger.Debugw("closing relay participant", "destNodeID", p.DestNodeID(),
+			"Name", p.Name())
+		if !p.IsClosed() {
+			go p.Close()
+		}
+	}
+
 	p.client.Start()
+
+	go p.relayClientWorker()
 	return nil
 }
 
 func (p *RelayParticipant) Stop() {
-	p.client.Close()
+	p.client.Stop()
+}
+
+func (p *RelayParticipant) State() livekit.ParticipantInfo_State {
+	return p.client.State()
+}
+
+func (p *RelayParticipant) relayClientWorker() {
+	reconcileTicker := time.NewTicker(relayClientInterval)
+	defer reconcileTicker.Stop()
+	defer close(p.doneCh)
+
+	for {
+		select {
+		case <-p.closeCh:
+			return
+		case <-reconcileTicker.C:
+			if p.client.reqSink.IsClosed() && !p.IsClosed() {
+				p.logger.Debugw("relay signal channel closed, closing relay participant",
+					"destNodeID", p.DestNodeID(), "Name", p.baseParticipant.Name())
+				go p.Close()
+				return
+			}
+
+			reqMessageIn := &livekit.SignalRequest{
+				Message: &livekit.SignalRequest_PingReq{PingReq: &livekit.Ping{
+					Timestamp: time.Now().UnixMilli(),
+				}},
+			}
+			err := p.client.reqSink.WriteMessage(reqMessageIn)
+			if err != nil {
+				p.logger.Errorw("send heart beat ping failed", err,
+					"RemoteNode", string(p.nodeID), "Room", p.roomName, "Participant", string(p.Identity()))
+
+				if !p.IsClosed() {
+					p.logger.Debugw("closing relay participant", "destNodeID", p.DestNodeID(),
+						"Name", p.Name())
+					go p.Close()
+				}
+				return
+			}
+		}
+	}
 }
 
 func (p *RelayParticipant) PublishTrack(track webrtc.TrackLocal, opts *TrackPublicationOptions) (*LocalTrackPublication, error) {
@@ -432,7 +538,7 @@ func (p *RelayParticipant) PublishTrack(track webrtc.TrackLocal, opts *TrackPubl
 	p.Callback.OnLocalTrackPublished(pub, p)
 	//p.roomCallback.OnLocalTrackPublished(pub, p)
 
-	p.engine.logger.Infow("published track", "name", opts.Name, "source", opts.Source.String(), "trackID", pubRes.Track.Sid)
+	p.engine.logger.Debugw("published track", "name", opts.Name, "source", opts.Source.String(), "trackID", pubRes.Track.Sid)
 	return pub, nil
 }
 
@@ -560,7 +666,7 @@ func (p *RelayParticipant) PublishSimulcastTrack(tracks []*LocalTrack, opts *Tra
 	p.Callback.OnLocalTrackPublished(pub, p)
 	//p.roomCallback.OnLocalTrackPublished(pub, p)
 
-	p.engine.logger.Infow("published simulcast track", "name", opts.Name, "source", opts.Source.String(), "trackID", pubRes.Track.Sid)
+	p.engine.logger.Debugw("published simulcast track", "name", opts.Name, "source", opts.Source.String(), "trackID", pubRes.Track.Sid)
 
 	return pub, nil
 }
@@ -693,6 +799,7 @@ func (p *RelayParticipant) UnpublishTrack(sid string) error {
 				break
 			}
 		}
+		p.logger.Debugw("UnpublishTrack: negotiate for publisher")
 		publisher.Negotiate()
 	}
 
@@ -701,8 +808,7 @@ func (p *RelayParticipant) UnpublishTrack(sid string) error {
 	p.Callback.OnLocalTrackUnpublished(pub, p)
 	//p.roomCallback.OnLocalTrackUnpublished(pub, p)
 
-	p.engine.logger.Infow("unpublished track", "name", pub.Name(), "trackID", sid)
-
+	p.engine.logger.Debugw("track unpublished", "name", pub.Name(), "trackID", sid)
 	return err
 }
 
@@ -863,7 +969,7 @@ func (p *RelayParticipant) StreamText(options StreamTextOptions) *TextStreamWrit
 
 	writer := newTextStreamWriter(info, header, p.engine, options.DestinationIdentities, options.OnProgress)
 
-	p.engine.OnClose(func() {
+	p.engine.AddOnClose(func() {
 		writer.Close()
 	})
 
@@ -986,7 +1092,7 @@ func (p *RelayParticipant) StreamBytes(options StreamBytesOptions) *ByteStreamWr
 
 	writer := newByteStreamWriter(info, header, p.engine, options.DestinationIdentities, options.OnProgress)
 
-	p.engine.OnClose(func() {
+	p.engine.AddOnClose(func() {
 		writer.Close()
 	})
 

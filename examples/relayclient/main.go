@@ -86,7 +86,7 @@ func main() {
 
 	log.Printf("Broadcasting RoomOnline for room %s...\n", roomName)
 
-	nodes, err := relayServiceClient.RoomOnline(context.Background(), livekit.RoomName(roomName))
+	nodes, err := relayServiceClient.RoomOnline(context.Background(), livekit.RoomName(roomName), false)
 	if err != nil {
 		log.Fatalf("Send RoomOnline failed! %v", err)
 		os.Exit(1)

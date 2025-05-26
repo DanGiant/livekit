@@ -17,6 +17,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"os"
 	"sync"
 	"time"
@@ -81,6 +82,7 @@ type RoomManager struct {
 	versionGenerator  utils.TimedVersionGenerator
 	turnAuthHandler   *TURNAuthHandler
 	bus               psrpc.MessageBus
+	relaySignalClient *CloudRelaySignalClient
 
 	rooms map[livekit.RoomName]*rtc.Room
 
@@ -666,7 +668,7 @@ func (r *RoomManager) StartRelayInSession(
 		sid,
 		true,
 	)
-	pLogger.Infow("starting RTC session",
+	pLogger.Infow("starting Relay-in RTC session",
 		"room", room.Name(),
 		"nodeID", r.currentNode.NodeID(),
 		"numParticipants", room.GetParticipantCount(),
@@ -825,6 +827,99 @@ func (r *RoomManager) StartRelayInSession(
 	return nil
 }
 
+func (m *RoomManager) CreateRelayParticipantToNode(participantID livekit.ParticipantID, toNode livekit.NodeID, roomName livekit.RoomName) (*relay.RelayParticipant, error) {
+	m.lock.RLock()
+	room, ok := m.rooms[roomName]
+	if !ok {
+		return nil, relay.ErrNoRemoteRoom
+	}
+	participants := room.GetLocalParticipants()
+	m.lock.RUnlock()
+
+	var participant types.LocalParticipant
+	for _, p := range participants {
+		if p.ID() == participantID {
+			participant = p
+			break
+		}
+	}
+
+	// check existance of the relay
+	p, ok := participant.(*rtc.ParticipantImpl)
+	if !ok {
+		return nil, relay.ErrParticipantNotReadyForRelay
+	}
+
+	// check should relay
+	if p.IsRemoteRelay() || !p.CanPublish() {
+		return nil, relay.ErrParticipantIsNotPublisher
+	}
+
+	sid := participant.ID()
+	logger.Infow("Trying to create relay signal",
+		"RemoteNode", string(toNode), "Room", roomName, "Participant", string(sid))
+
+	//clientInfo := *participant.GetClientInfo()
+	//clientInfo.Sdk = livekit.ClientInfo_GO
+	clientInfo := livekit.ClientInfo{
+		Sdk:         livekit.ClientInfo_GO,
+		Protocol:    6,
+		Browser:     "",
+		DeviceModel: "",
+	}
+
+	grants := participant.ClaimGrants().Clone()
+	if grants != nil && grants.Video != nil && grants.Video.CanPublish != nil {
+		isPublisher := *grants.Video.CanPublish
+		if !isPublisher {
+			return nil, relay.ErrParticipantIsNotPublisher
+		}
+	}
+
+	grants.Video.RoomJoin = true
+	grants.Video.Room = string(roomName)
+	valFalse := false
+	grants.Video.CanSubscribe = &valFalse
+
+	pri := routing.ParticipantRelayInit{
+		RoomName:       roomName,
+		FromNode:       m.currentNode.NodeID(),
+		ToNode:         toNode,
+		ID:             sid,
+		Identity:       participant.Identity(),
+		Name:           participant.Name(),
+		Client:         &clientInfo,
+		Grants:         grants,
+		Region:         "",
+		Reconnect:      false,
+		AutoSubscribe:  false,
+		AdaptiveStream: false,
+		DisableICELite: true,
+	}
+	_, reqSink, resSource, err := (*m.relaySignalClient).StartParticipantRelaySignal(context.Background(), roomName, toNode, pri)
+	if err != nil {
+		logger.Errorw("start relay signal client failed", err,
+			"ToNode", string(toNode), "Room", roomName, "ParticipantSid", string(sid))
+		return nil, err
+	}
+
+	signalClient := relay.NewRelaySignalClient(relay.RelaySignalClientParams{
+		Logger:    logger.GetLogger(),
+		ReqSink:   reqSink,
+		ResSource: resSource,
+	})
+
+	relayParticipant := relay.NewRelayParticipant(relay.RelayParticipantParams{
+		Logger:        logger.GetLogger(),
+		Configuration: m.rtcConfig.Configuration,
+		RoomName:      roomName,
+		NodeID:        toNode,
+		SignalClient:  signalClient,
+	})
+
+	return relayParticipant, nil
+}
+
 func (r *RoomManager) GetRoomByName(ctx context.Context, roomName livekit.RoomName) (*rtc.Room, error) {
 	r.lock.RLock()
 	lastSeenRoom := r.rooms[roomName]
@@ -941,7 +1036,89 @@ func (r *RoomManager) getOrCreateRoom(ctx context.Context, createRoom *livekit.C
 		}
 	}
 
+	go func() {
+		if created && r.relaySignalClient != nil {
+			signalClient := *r.relaySignalClient
+			nodes, err := signalClient.RoomOnline(ctx, roomName, true)
+			if err == nil {
+				if len(*nodes) > 0 {
+					logger.Infow("relay service for room success", "RoomName", roomName, "RoomNum", len(*nodes))
+					for _, node := range *nodes {
+						remoteRoom := rtc.NewRemoteRoom(rtc.RemoteRoomParams{
+							Logger:       newRoom.Logger,
+							RoomManager:  r,
+							Room:         newRoom,
+							RemoteNodeID: node})
+						newRoom.AddRemoteRoom(remoteRoom)
+
+						participants := newRoom.GetLocalParticipants()
+						for _, p := range participants {
+							if !p.IsRecorder() && !p.IsDependent() && p.IsPublisher() &&
+								p.State() == livekit.ParticipantInfo_ACTIVE {
+								remoteRoom.AddParticipant(p.ID())
+							}
+						}
+					}
+				} else {
+					logger.Infow("relay service find no other room", "RoomName", roomName)
+				}
+			} else if err == ErrRoomNotFound {
+				logger.Infow("relay service find no other room", "RoomName", roomName)
+			} else {
+				logger.Errorw("relay service for room failed", err, "RoomName", roomName)
+			}
+		}
+	}()
+
 	return newRoom, nil
+}
+
+func (r *RoomManager) AddRemoteNodeToRoom(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) {
+	// get remote-room
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	room, ok := r.rooms[roomName]
+	if !ok {
+		logger.Errorw("AddRemoteNodeToRoom can not find the room", ErrRoomNotFound, "roomName", roomName)
+		return
+	}
+
+	remoteRoom, _ := room.GetRemoteRoom(fromNode)
+	if remoteRoom == nil {
+		logger.Infow("AddRemoteNodeToRoom: create remote room", "roomName", roomName, "remoteNode", fromNode)
+
+		remoteRoom = rtc.NewRemoteRoom(rtc.RemoteRoomParams{
+			Logger:       room.Logger,
+			RoomManager:  r,
+			Room:         room,
+			RemoteNodeID: fromNode})
+		room.AddRemoteRoom(remoteRoom)
+	}
+
+	if remoteRoom != nil {
+		participants := room.GetLocalParticipants()
+
+		logger.Infow("AddRemoteNodeToRoom: queue participant for reconcile", "roomName", roomName,
+			"remoteNode", fromNode, "LocalRoomParticipantNum", len(participants))
+
+		for _, p := range participants {
+			logger.Infow("queue participant for reconcile",
+				"roomName", roomName, "remoteNode", fromNode,
+				"Participant", p.ID(), "isRecorder", p.IsRecorder(),
+				"IsDependent", p.IsDependent(), "IsPublisher", p.IsPublisher(),
+				"state", p.State().String())
+
+			if !p.IsRecorder() && !p.IsDependent() && p.IsPublisher() &&
+				p.State() == livekit.ParticipantInfo_ACTIVE {
+				remoteRoom.AddParticipant(p.ID())
+			}
+		}
+	}
+}
+
+func (r *RoomManager) RemoveRemoteNodeFromRoom(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) {
+
 }
 
 // manages an RTC session for a participant, runs on the RTC node

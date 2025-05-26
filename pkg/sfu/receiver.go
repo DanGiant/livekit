@@ -119,6 +119,10 @@ type TrackReceiver interface {
 	DeleteDownTrack(participantID livekit.ParticipantID)
 	GetDownTracks() []TrackSender
 
+	AddRelayDownTrack(track RelayTrackSender) error
+	DeleteRelayDownTrack(destNodeID livekit.NodeID)
+	GetRelayDownTracks() []RelayTrackSender
+
 	DebugInfo() map[string]interface{}
 
 	TrackInfo() *livekit.TrackInfo
@@ -179,6 +183,8 @@ type WebRTCReceiver struct {
 	streamTrackerManager *StreamTrackerManager
 
 	downTrackSpreader *DownTrackSpreader
+
+	relayDownTrackSpreader *RelayDownTrackSpreader
 
 	connectionStats *connectionquality.ConnectionStats
 
@@ -266,6 +272,11 @@ func NewWebRTCReceiver(
 	w.trackInfo.Store(utils.CloneProto(trackInfo))
 
 	w.downTrackSpreader = NewDownTrackSpreader(DownTrackSpreaderParams{
+		Threshold: w.lbThreshold,
+		Logger:    logger,
+	})
+
+	w.relayDownTrackSpreader = NewRelayDownTrackSpreader(DownTrackSpreaderParams{
 		Threshold: w.lbThreshold,
 		Logger:    logger,
 	})
@@ -405,6 +416,9 @@ func (w *WebRTCReceiver) AddUpTrack(track TrackRemote, buff *buffer.Buffer) erro
 		w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 			_ = dt.HandleRTCPSenderReportData(w.codec.PayloadType, w.isSVC, layer, srData)
 		})
+		//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+		//	_ = dt.HandleRTCPSenderReportData(w.codec.PayloadType, w.isSVC, layer, srData)
+		//})
 	})
 
 	if w.Kind() == webrtc.RTPCodecTypeVideo && layer == 0 {
@@ -487,6 +501,29 @@ func (w *WebRTCReceiver) GetDownTracks() []TrackSender {
 	return w.downTrackSpreader.GetDownTracks()
 }
 
+func (w *WebRTCReceiver) AddRelayDownTrack(track RelayTrackSender) error {
+	logger.Infow("WebRTCReceiver AddRelayDownTrack")
+
+	if w.closed.Load() {
+		return ErrReceiverClosed
+	}
+
+	if w.relayDownTrackSpreader.HasRelayDownTrack(track.RelayDestNodeID()) {
+		w.logger.Infow("destNodeID already exists, replacing relay down track", "destNodeID", track.RelayDestNodeID())
+	}
+
+	//track.UpTrackMaxPublishedLayerChange(w.streamTrackerManager.GetMaxPublishedLayer())
+	//track.UpTrackMaxTemporalLayerSeenChange(w.streamTrackerManager.GetMaxTemporalLayerSeen())
+
+	w.relayDownTrackSpreader.Store(track)
+	w.logger.Debugw("relay down track added", "destNodeID", track.RelayDestNodeID())
+	return nil
+}
+
+func (w *WebRTCReceiver) GetRelayDownTracks() []RelayTrackSender {
+	return w.relayDownTrackSpreader.GetRelayDownTracks()
+}
+
 func (w *WebRTCReceiver) notifyMaxExpectedLayer(layer int32) {
 	ti := w.TrackInfo()
 	if ti == nil {
@@ -526,6 +563,9 @@ func (w *WebRTCReceiver) OnAvailableLayersChanged() {
 	w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.UpTrackLayersChange()
 	})
+	//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.UpTrackLayersChange()
+	//})
 
 	w.connectionStats.AddLayerTransition(w.streamTrackerManager.DistanceToDesired())
 }
@@ -535,6 +575,9 @@ func (w *WebRTCReceiver) OnBitrateAvailabilityChanged() {
 	w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.UpTrackBitrateAvailabilityChange()
 	})
+	//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.UpTrackBitrateAvailabilityChange()
+	//})
 }
 
 // StreamTrackerManagerListener.OnMaxPublishedLayerChanged
@@ -542,6 +585,9 @@ func (w *WebRTCReceiver) OnMaxPublishedLayerChanged(maxPublishedLayer int32) {
 	w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.UpTrackMaxPublishedLayerChange(maxPublishedLayer)
 	})
+	//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.UpTrackMaxPublishedLayerChange(maxPublishedLayer)
+	//})
 
 	w.notifyMaxExpectedLayer(maxPublishedLayer)
 	w.connectionStats.AddLayerTransition(w.streamTrackerManager.DistanceToDesired())
@@ -552,6 +598,9 @@ func (w *WebRTCReceiver) OnMaxTemporalLayerSeenChanged(maxTemporalLayerSeen int3
 	w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.UpTrackMaxTemporalLayerSeenChange(maxTemporalLayerSeen)
 	})
+	//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.UpTrackMaxTemporalLayerSeenChange(maxTemporalLayerSeen)
+	//})
 
 	w.connectionStats.AddLayerTransition(w.streamTrackerManager.DistanceToDesired())
 }
@@ -568,6 +617,9 @@ func (w *WebRTCReceiver) OnBitrateReport(availableLayers []int32, bitrates Bitra
 	w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.UpTrackBitrateReport(availableLayers, bitrates)
 	})
+	//w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.UpTrackBitrateReport(availableLayers, bitrates)
+	//})
 
 	w.connectionStats.AddLayerTransition(w.streamTrackerManager.DistanceToDesired())
 }
@@ -589,6 +641,15 @@ func (w *WebRTCReceiver) DeleteDownTrack(subscriberID livekit.ParticipantID) {
 
 	w.downTrackSpreader.Free(subscriberID)
 	w.logger.Debugw("downtrack deleted", "subscriberID", subscriberID)
+}
+
+func (w *WebRTCReceiver) DeleteRelayDownTrack(destNodeID livekit.NodeID) {
+	if w.closed.Load() {
+		return
+	}
+
+	w.relayDownTrackSpreader.Free(destNodeID)
+	w.logger.Debugw("relay down track deleted", "destNodeID", destNodeID)
 }
 
 func (w *WebRTCReceiver) sendRTCP(packets []rtcp.Packet) {
@@ -729,6 +790,8 @@ func (w *WebRTCReceiver) GetLastSenderReportTime() time.Time {
 
 func (w *WebRTCReceiver) forwardRTP(layer int32, buff *buffer.Buffer) {
 	defer func() {
+		w.logger.Infow("WebRTCReceiver forwardRTP exits!!!")
+
 		w.closeOnce.Do(func() {
 			w.closed.Store(true)
 			w.closeTracks()
@@ -757,11 +820,20 @@ func (w *WebRTCReceiver) forwardRTP(layer int32, buff *buffer.Buffer) {
 	for {
 		pkt, err := buff.ReadExtended(pktBuf)
 		if err == io.EOF {
+			w.logger.Errorw("forwardRTP EOF", err, "layer", layer)
 			return
 		}
 
+		//w.logger.Infow("ReadExtended", "layer", layer,
+		//	"PayloadType", pkt.Packet.PayloadType, "SSRC", pkt.Packet.SSRC,
+		//	"PayloadLength", len(pkt.Packet.Payload))
+
 		if pkt.Packet.PayloadType != uint8(w.codec.PayloadType) {
 			// drop packets as we don't support codec fallback directly
+			w.logger.Infow("invalid PayloadType",
+				"PacketPayloadType", pkt.Packet.PayloadType,
+				"CodecPayloadType", uint8(w.codec.PayloadType),
+				"layer", layer)
 			continue
 		}
 
@@ -778,6 +850,15 @@ func (w *WebRTCReceiver) forwardRTP(layer int32, buff *buffer.Buffer) {
 			)
 			continue
 		}
+
+		w.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+
+			//w.logger.Infow("Broadcast RTP", "layer", layer,
+			//	"PayloadType", pkt.Packet.PayloadType, "SSRC", pkt.Packet.SSRC,
+			//	"PayloadLength", len(pkt.Packet.Payload))
+
+			_ = dt.WriteRTP(pkt, spatialLayer)
+		})
 
 		writeCount := w.downTrackSpreader.Broadcast(func(dt TrackSender) {
 			_ = dt.WriteRTP(pkt, spatialLayer)
@@ -820,6 +901,7 @@ func (w *WebRTCReceiver) closeTracks() {
 	w.streamTrackerManager.Close()
 
 	closeTrackSenders(w.downTrackSpreader.ResetAndGetDownTracks())
+	closeRelayTrackSenders(w.relayDownTrackSpreader.ResetAndGetRelayDownTracks())
 
 	if w.onCloseHandler != nil {
 		w.onCloseHandler()
@@ -944,6 +1026,20 @@ func (w *WebRTCReceiver) SetCodecState(state ReceiverCodecState) {
 
 // closes all track senders in parallel, returns when all are closed
 func closeTrackSenders(senders []TrackSender) {
+	wg := sync.WaitGroup{}
+	for _, dt := range senders {
+		dt := dt
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dt.Close()
+		}()
+	}
+	wg.Wait()
+}
+
+// closes all relay track senders in parallel, returns when all are closed
+func closeRelayTrackSenders(senders []RelayTrackSender) {
 	wg := sync.WaitGroup{}
 	for _, dt := range senders {
 		dt := dt

@@ -111,12 +111,12 @@ message RoomSignalRelayResponse {
 message RoomOnlineRequest {
   string room_name = 1;
   string node_id = 2;
+  bool is_server_node = 3;
 }
 
 message RoomOnlineResponse {
   string room_name = 1;
   string node_id = 2;
-//  bool exist = 3;
 }
 
 message RoomOfflineRequest {
@@ -127,43 +127,4 @@ message RoomOfflineRequest {
 message RoomOfflineResponse {
   string room_name = 1;
   string node_id = 2;
-//  bool exist = 3;
 }
-
-// Relayed signal messages
-//message RelayedSignalRequest {
-//  oneof message {
-//    ForwardParticipant forward = 1;
-//    // initial join exchange, for publisher
-//    SessionDescription offer = 2;
-//    // participant answering publisher offer
-//    SessionDescription answer = 3;
-//    // trickle
-//    TrickleRequest trickle = 4;
-//    // add track
-//    AddTrackRequest add_track = 5;
-//    // mute the participant's published tracks
-//    MuteTrackRequest mute = 6;
-//
-//    // heart beat ping
-//    Ping ping_req = 16;
-//  }
-//}
-//
-//message RelayedSignalResponse {
-//  oneof message {
-//    // sent when server answers publisher
-//    SessionDescription answer = 1;
-//    // sent when server is sending subscriber an offer
-//    SessionDescription offer = 2;
-//    // sent when an ICE candidate is available
-//    TrickleRequest trickle = 3;
-//    // sent when participants in the room has changed
-//    ParticipantUpdate update = 4;
-//
-//    // respond to Ping
-//    Pong pong_resp = 20;
-//  }
-//}
-
-

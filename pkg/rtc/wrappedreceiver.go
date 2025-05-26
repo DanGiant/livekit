@@ -156,6 +156,16 @@ func (r *WrappedReceiver) DeleteDownTrack(participantID livekit.ParticipantID) {
 	}
 }
 
+func (r *WrappedReceiver) DeleteRelayDownTrack(destNodeID livekit.NodeID) {
+	r.lock.Lock()
+	trackReceiver := r.TrackReceiver
+	r.lock.Unlock()
+
+	if trackReceiver != nil {
+		trackReceiver.DeleteRelayDownTrack(destNodeID)
+	}
+}
+
 func (r *WrappedReceiver) AddOnReady(f func()) {
 	r.lock.Lock()
 	trackReceiver := r.TrackReceiver
@@ -180,6 +190,8 @@ type DummyReceiver struct {
 
 	downTrackLock      sync.Mutex
 	downTracks         map[livekit.ParticipantID]sfu.TrackSender
+	relayDownTrackLock sync.Mutex
+	relayDownTracks    map[livekit.NodeID]sfu.RelayTrackSender
 	onReadyCallbacks   []func()
 	onCodecStateChange []func(webrtc.RTPCodecParameters, sfu.ReceiverCodecState)
 
@@ -211,6 +223,13 @@ func (d *DummyReceiver) Upgrade(receiver sfu.TrackReceiver) {
 	if !d.receiver.CompareAndSwap(nil, receiver) {
 		return
 	}
+
+	d.relayDownTrackLock.Lock()
+	for _, t := range d.relayDownTracks {
+		receiver.AddRelayDownTrack(t)
+	}
+	d.relayDownTracks = make(map[livekit.NodeID]sfu.RelayTrackSender)
+	d.relayDownTrackLock.Unlock()
 
 	d.downTrackLock.Lock()
 	for _, t := range d.downTracks {
@@ -364,6 +383,39 @@ func (d *DummyReceiver) GetDownTracks() []sfu.TrackSender {
 	return maps.Values(d.downTracks)
 }
 
+func (d *DummyReceiver) AddRelayDownTrack(track sfu.RelayTrackSender) error {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.receiver.Load().(sfu.TrackReceiver); ok {
+		r.AddRelayDownTrack(track)
+	} else {
+		d.relayDownTracks[track.RelayDestNodeID()] = track
+	}
+	return nil
+}
+
+func (d *DummyReceiver) DeleteRelayDownTrack(destNodeID livekit.NodeID) {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.receiver.Load().(sfu.TrackReceiver); ok {
+		r.DeleteRelayDownTrack(destNodeID)
+	} else {
+		delete(d.relayDownTracks, destNodeID)
+	}
+}
+
+func (d *DummyReceiver) GetRelayDownTracks() []sfu.RelayTrackSender {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.receiver.Load().(sfu.TrackReceiver); ok {
+		return r.GetRelayDownTracks()
+	}
+	return maps.Values(d.relayDownTracks)
+}
+
 func (d *DummyReceiver) DebugInfo() map[string]interface{} {
 	if r, ok := d.receiver.Load().(sfu.TrackReceiver); ok {
 		return r.DebugInfo()
@@ -480,6 +532,9 @@ type DummyRedReceiver struct {
 
 	downTrackLock sync.Mutex
 	downTracks    map[livekit.ParticipantID]sfu.TrackSender
+
+	relayDownTrackLock sync.Mutex
+	relayDownTracks    map[livekit.NodeID]sfu.RelayTrackSender
 }
 
 func NewDummyRedReceiver(d *DummyReceiver, isRedEncoding bool) *DummyRedReceiver {
@@ -523,6 +578,39 @@ func (d *DummyRedReceiver) GetDownTracks() []sfu.TrackSender {
 	return maps.Values(d.downTracks)
 }
 
+func (d *DummyRedReceiver) AddRelayDownTrack(track sfu.RelayTrackSender) error {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.redReceiver.Load().(sfu.TrackReceiver); ok {
+		r.AddRelayDownTrack(track)
+	} else {
+		d.relayDownTracks[track.RelayDestNodeID()] = track
+	}
+	return nil
+}
+
+func (d *DummyRedReceiver) DeleteRelayDownTrack(destNodeID livekit.NodeID) {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.redReceiver.Load().(sfu.TrackReceiver); ok {
+		r.DeleteRelayDownTrack(destNodeID)
+	} else {
+		delete(d.relayDownTracks, destNodeID)
+	}
+}
+
+func (d *DummyRedReceiver) GetRelayDownTracks() []sfu.RelayTrackSender {
+	d.relayDownTrackLock.Lock()
+	defer d.relayDownTrackLock.Unlock()
+
+	if r, ok := d.redReceiver.Load().(sfu.TrackReceiver); ok {
+		return r.GetRelayDownTracks()
+	}
+	return maps.Values(d.relayDownTracks)
+}
+
 func (d *DummyRedReceiver) ReadRTP(buf []byte, layer uint8, esn uint64) (int, error) {
 	if r, ok := d.redReceiver.Load().(sfu.TrackReceiver); ok {
 		return r.ReadRTP(buf, layer, esn)
@@ -545,4 +633,11 @@ func (d *DummyRedReceiver) upgrade(receiver sfu.TrackReceiver) {
 	}
 	d.downTracks = make(map[livekit.ParticipantID]sfu.TrackSender)
 	d.downTrackLock.Unlock()
+
+	d.relayDownTrackLock.Lock()
+	for _, t := range d.relayDownTracks {
+		redReceiver.AddRelayDownTrack(t)
+	}
+	d.relayDownTracks = make(map[livekit.NodeID]sfu.RelayTrackSender)
+	d.relayDownTrackLock.Unlock()
 }

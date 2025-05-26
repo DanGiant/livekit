@@ -2,6 +2,7 @@
 package typesfakes
 
 import (
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"sync"
 	"time"
 
@@ -1496,6 +1497,10 @@ func (fake *FakeLocalParticipant) CanPublishData() bool {
 	return fakeReturns.result1
 }
 
+func (fake *FakeLocalParticipant) CanRelay() bool {
+	return false
+}
+
 func (fake *FakeLocalParticipant) CanPublishDataCallCount() int {
 	fake.canPublishDataMutex.RLock()
 	defer fake.canPublishDataMutex.RUnlock()
@@ -2525,6 +2530,14 @@ func (fake *FakeLocalParticipant) GetConnectionQuality() *livekit.ConnectionQual
 		return ret.result1
 	}
 	return fakeReturns.result1
+}
+
+func (fake *FakeLocalParticipant) AddRelayParticipantToNode(nodeID livekit.NodeID, relayParticipant *relay.RelayParticipant) error {
+	return nil
+}
+
+func (fake *FakeLocalParticipant) RemoveRelayParticipantFromNode(nodeID livekit.NodeID) (*relay.RelayParticipant, error) {
+	return nil, nil
 }
 
 func (fake *FakeLocalParticipant) GetConnectionQualityCallCount() int {

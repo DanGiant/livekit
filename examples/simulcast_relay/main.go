@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"github.com/go-logr/stdr"
 	"github.com/livekit/livekit-server/pkg/config"
-	"github.com/livekit/livekit-server/pkg/relay"
 	"github.com/livekit/livekit-server/pkg/routing"
 	"github.com/livekit/livekit-server/pkg/rpc"
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"github.com/livekit/livekit-server/pkg/service"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
@@ -109,7 +109,7 @@ func runRoomRelay(logger logger.Logger, localNode livekit.NodeID, roomName livek
 
 	logger.Infow("Broadcasting RoomOnline...", err, "Node", localNode, "Room", roomName)
 
-	nodes, err := relayClient.RoomOnline(context.Background(), livekit.RoomName(roomName))
+	nodes, err := relayClient.RoomOnline(context.Background(), livekit.RoomName(roomName), false)
 	if err != nil {
 		logger.Errorw("send RoomOnline failed", err, "LocalNode", localNode, "Room", roomName)
 		os.Exit(1)
@@ -247,28 +247,10 @@ func runRoomRelay(logger logger.Logger, localNode livekit.NodeID, roomName livek
 			}
 
 			defer func() {
-				relayParticipant.Stop()
+				go relayParticipant.Close()
 			}()
 
-			ticker := time.NewTicker(10 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					reqMessageIn := &livekit.SignalRequest{
-						Message: &livekit.SignalRequest_PingReq{PingReq: &livekit.Ping{
-							Timestamp: time.Now().UnixMilli(),
-						}},
-					}
-					err = reqSink.WriteMessage(reqMessageIn)
-					if err != nil {
-						logger.Errorw("send heart beat ping failed", err,
-							"ToNode", string(toNode), "Room", roomName, "ParticipantSid", string(sid))
-						os.Exit(1)
-					}
-				}
-			}
+			select {}
 		}()
 	}
 

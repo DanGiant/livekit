@@ -21,10 +21,11 @@ type RelaySignalClient struct {
 	resSource       routing.MessageSource
 	lock            sync.Mutex
 	isStarted       atomic.Bool
+	clientState     livekit.ParticipantInfo_State
 	pendingResponse *livekit.SignalResponse
 	readerClosedCh  chan struct{}
+	doneCh          chan struct{}
 
-	OnJoin                  func(joinRes *livekit.JoinResponse)
 	HandleJoin              func()
 	OnClose                 func()
 	OnAnswer                func(sd webrtc.SessionDescription)
@@ -38,14 +39,16 @@ type RelaySignalClient struct {
 	OnTrackRemoteMuted      func(request *livekit.MuteTrackRequest)
 	OnLocalTrackUnpublished func(response *livekit.TrackUnpublishedResponse)
 	//OnTokenRefresh          func(refreshToken string)
+	OnJoin  func(joinRes *livekit.JoinResponse)
 	OnLeave func(*livekit.LeaveRequest)
 }
 
 func NewRelaySignalClient(params RelaySignalClientParams) *RelaySignalClient {
 	c := &RelaySignalClient{
-		logger:    params.Logger,
-		reqSink:   params.ReqSink,
-		resSource: params.ResSource,
+		logger:      params.Logger,
+		reqSink:     params.ReqSink,
+		resSource:   params.ResSource,
+		clientState: livekit.ParticipantInfo_DISCONNECTED,
 	}
 	return c
 }
@@ -54,16 +57,43 @@ func (c *RelaySignalClient) Start() {
 	if c.isStarted.Swap(true) {
 		return
 	}
+	c.clientState = livekit.ParticipantInfo_JOINING
 	c.readerClosedCh = make(chan struct{})
+	c.doneCh = make(chan struct{})
 	go c.readWorker(c.readerClosedCh)
 }
 
-func (c *RelaySignalClient) Close() {
+func (c *RelaySignalClient) Stop() {
+	if !c.isStarted.Load() {
+		return
+	}
+
+	logger.Debugw("sending SignalRequest_Leave for relay participant")
+
+	if !c.reqSink.IsClosed() {
+		_ = c.SendRequest(&livekit.SignalRequest{
+			Message: &livekit.SignalRequest_Leave{
+				Leave: &livekit.LeaveRequest{
+					Reason: livekit.DisconnectReason_CLIENT_INITIATED,
+					Action: livekit.LeaveRequest_DISCONNECT,
+				},
+			},
+		})
+	}
+
+	c.close()
+}
+
+func (c *RelaySignalClient) close() {
+	c.lock.Lock()
 	isStarted := c.IsStarted()
 	readerClosedCh := c.readerClosedCh
+	doneCh := c.doneCh
+	c.lock.Unlock()
 
 	if isStarted && readerClosedCh != nil {
-		<-readerClosedCh
+		close(readerClosedCh)
+		<-doneCh
 	}
 
 	c.reqSink.Close()
@@ -72,6 +102,14 @@ func (c *RelaySignalClient) Close() {
 
 func (c *RelaySignalClient) IsStarted() bool {
 	return c.isStarted.Load()
+}
+
+func (c *RelaySignalClient) SetState(state livekit.ParticipantInfo_State) {
+	c.clientState = state
+}
+
+func (c *RelaySignalClient) State() livekit.ParticipantInfo_State {
+	return c.clientState
 }
 
 func (c *RelaySignalClient) SendICECandidate(candidate webrtc.ICECandidateInit, target livekit.SignalTarget) error {
@@ -152,22 +190,12 @@ func (c *RelaySignalClient) SendUpdateParticipantMetadata(metadata *livekit.Upda
 }
 
 func (c *RelaySignalClient) handleResponse(res *livekit.SignalResponse) {
-	c.logger.Infow("handleResponse", "res", res)
+	c.logger.Debugw("handleResponse", "res", res)
 
 	switch msg := res.Message.(type) {
 	case *livekit.SignalResponse_Join:
-		//c.localParticipant = msg.Join.Participant
-		//c.id = livekit.ParticipantID(msg.Join.Participant.Sid)
-
-		// if publish only, negotiate
-		//if !msg.Join.SubscriberPrimary {
-		//	c.subscriberAsPrimary.Store(false)
-		//	c.publisher.Negotiate(false)
-		//} else {
-		//	c.subscriberAsPrimary.Store(true)
-		//}
-
-		c.logger.Infow("join accepted, awaiting offer", "participant", msg.Join.Participant.Identity)
+		c.clientState = livekit.ParticipantInfo_JOINED
+		c.logger.Debugw("join accepted, awaiting offer", "participant", msg.Join.Participant.Identity)
 		if c.OnJoin != nil {
 			c.OnJoin(msg.Join)
 		}
@@ -208,6 +236,7 @@ func (c *RelaySignalClient) handleResponse(res *livekit.SignalResponse) {
 			c.OnRoomUpdate(msg.RoomUpdate.Room)
 		}
 	case *livekit.SignalResponse_Leave:
+		c.clientState = livekit.ParticipantInfo_DISCONNECTED
 		if c.OnLeave != nil {
 			c.OnLeave(msg.Leave)
 		}
@@ -225,11 +254,10 @@ func (c *RelaySignalClient) handleResponse(res *livekit.SignalResponse) {
 func (c *RelaySignalClient) readWorker(readerClosedCh chan struct{}) {
 	defer func() {
 		c.isStarted.Store(false)
-		close(readerClosedCh)
-
 		if c.OnClose != nil {
 			c.OnClose()
 		}
+		close(c.doneCh)
 	}()
 
 	if pending := c.pendingResponse; pending != nil {

@@ -2,6 +2,7 @@
 package typesfakes
 
 import (
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"sync"
 
 	"github.com/livekit/livekit-server/pkg/rtc/types"
@@ -341,6 +342,10 @@ func (fake *FakeMediaTrack) AddSubscriber(arg1 types.LocalParticipant) (types.Su
 		return ret.result1, ret.result2
 	}
 	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeMediaTrack) AddRelay(arg1 *relay.RelayParticipant) (types.RelayedTrack, error) {
+	return nil, nil
 }
 
 func (fake *FakeMediaTrack) AddSubscriberCallCount() int {
@@ -1420,6 +1425,11 @@ func (fake *FakeMediaTrack) RemoveSubscriber(arg1 livekit.ParticipantID, arg2 bo
 		fake.RemoveSubscriberStub(arg1, arg2)
 	}
 }
+
+func (fake *FakeMediaTrack) RemoveRelay(arg1 livekit.NodeID, arg2 bool) {
+
+}
+
 
 func (fake *FakeMediaTrack) RemoveSubscriberCallCount() int {
 	fake.removeSubscriberMutex.RLock()

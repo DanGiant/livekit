@@ -113,7 +113,7 @@ func NewRelayRTCEngine(params RelayRTCEngineParams) *RelayRTCEngine {
 	return e
 }
 
-func (e *RelayRTCEngine) OnClose(onClose func()) {
+func (e *RelayRTCEngine) AddOnClose(onClose func()) {
 	e.onCloseLock.Lock()
 	e.onClose = append(e.onClose, onClose)
 	e.onCloseLock.Unlock()
@@ -145,7 +145,7 @@ func (e *RelayRTCEngine) Close() {
 		//	_ = subscriber.Close()
 		//}
 
-		e.client.Close()
+		//e.client.Stop()
 	}()
 }
 
@@ -171,8 +171,8 @@ func (e *RelayRTCEngine) Publisher() (*PCTransport, bool) {
 func (e *RelayRTCEngine) makeRTCConfiguration(iceServers []*livekit.ICEServer /*, clientConfig *livekit.ClientConfiguration*/) webrtc.Configuration {
 	rtcICEServers := FromProtoIceServers(iceServers)
 	configuration := webrtc.Configuration{
-		ICEServers: rtcICEServers,
-		//ICETransportPolicy: e.connParams.ICETransportPolicy,
+		ICEServers:         rtcICEServers,
+		ICETransportPolicy: webrtc.ICETransportPolicyAll, // e.connParams.ICETransportPolicy,
 	}
 	//if clientConfig != nil &&
 	//	clientConfig.GetForceRelay() == livekit.ClientConfigSetting_ENABLED {
@@ -182,11 +182,13 @@ func (e *RelayRTCEngine) makeRTCConfiguration(iceServers []*livekit.ICEServer /*
 }
 
 func (e *RelayRTCEngine) configure(
-	iceServers []*livekit.ICEServer, /*,
-	clientConfig *livekit.ClientConfiguration,
-	subscriberPrimary *bool*/) error {
+	configuration webrtc.Configuration,
+	// iceServers []*livekit.ICEServer,
+	// clientConfig *livekit.ClientConfiguration,
+	// subscriberPrimary *bool,
+) error {
 
-	configuration := e.makeRTCConfiguration(iceServers /*, clientConfig*/)
+	//configuration := e.makeRTCConfiguration(iceServers /*, clientConfig*/)
 	e.pclock.Lock()
 	defer e.pclock.Unlock()
 
@@ -219,7 +221,7 @@ func (e *RelayRTCEngine) configure(
 	//}
 	e.publisher.SetLogger(e.logger)
 	//e.subscriber.SetLogger(e.logger)
-	e.logger.Debugw("Using ICE servers", "servers", iceServers)
+	//e.logger.Debugw("Using ICE servers", "servers", iceServers)
 
 	//if subscriberPrimary != nil {
 	//	e.subscriberPrimary = *subscriberPrimary
@@ -241,25 +243,8 @@ func (e *RelayRTCEngine) configure(
 		}
 
 	})
-	//e.subscriber.pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-	//	if candidate == nil {
-	//		// done
-	//		return
-	//	}
-	//	init := candidate.ToJSON()
-	//	e.logger.Debugw("local ICE candidate",
-	//		"target", livekit.SignalTarget_SUBSCRIBER,
-	//		"candidate", init.Candidate,
-	//	)
-	//	if err := e.client.SendICECandidate(init, livekit.SignalTarget_SUBSCRIBER); err != nil {
-	//		e.logger.Errorw("could not send ICE candidates for subscriber", err)
-	//	}
-	//})
 
 	primaryTransport := e.publisher
-	//if e.subscriberPrimary {
-	//	primaryTransport = e.subscriber
-	//}
 	primaryTransport.pc.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		switch state {
 		case webrtc.ICEConnectionStateConnected:
@@ -276,27 +261,9 @@ func (e *RelayRTCEngine) configure(
 		}
 	})
 
-	//e.subscriber.pc.OnTrack(func(remote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-	//	if e.OnMediaTrack != nil {
-	//		e.OnMediaTrack(remote, receiver)
-	//	}
-	//})
-	//
-	//e.subscriber.pc.OnDataChannel(func(c *webrtc.DataChannel) {
-	//	e.dclock.Lock()
-	//	defer e.dclock.Unlock()
-	//	if c.Label() == reliableDataChannelName {
-	//		e.reliableDCSub = c
-	//	} else if c.Label() == lossyDataChannelName {
-	//		e.lossyDCSub = c
-	//	} else {
-	//		return
-	//	}
-	//	c.OnMessage(e.handleDataPacket)
-	//})
-
 	e.publisher.OnOffer = func(offer webrtc.SessionDescription) {
 		e.hasPublish.Store(true)
+		e.logger.Debugw("send offer for publisher", "offer", offer)
 		if err := e.client.SendOffer(offer); err != nil {
 			e.logger.Errorw("could not send offer", err)
 		}
@@ -325,28 +292,47 @@ func (e *RelayRTCEngine) configure(
 	e.dclock.Unlock()
 
 	// configure client
-	e.client.OnJoin = func(joinRes *livekit.JoinResponse) {
-		e.logger.Debugw("negotiated publisher")
+	e.client.OnJoin = func(join *livekit.JoinResponse) {
+		e.logger.Debugw("relay rtc engine onJoin")
+
+		var iceServers []*livekit.ICEServer
+		if join.IceServers != nil && len(join.IceServers) > 0 {
+			for _, iceServer := range join.IceServers {
+				iceServers = append(iceServers, iceServer)
+			}
+		} else {
+			iceServers := make([]*livekit.ICEServer, 1)
+			iceServers[0] = &livekit.ICEServer{
+				Urls: []string{"stun:stun.l.google.com:19302"},
+			}
+		}
+		configuration := e.makeRTCConfiguration(iceServers)
+		err := e.publisher.SetConfiguration(configuration)
+		if err != nil {
+			e.logger.Errorw("set configuration for publisher failed", err)
+		}
+
 		e.publisher.Negotiate()
 
-		e.logger.Debugw("negotiated publisher handle join")
 		if e.client.HandleJoin != nil {
-			e.logger.Debugw("OnJoin call HandleJoin")
 			e.client.HandleJoin()
 		}
 	}
+
 	e.client.OnAnswer = func(sd webrtc.SessionDescription) {
 		if e.closed.Load() {
 			e.logger.Debugw("ignoring SDP answer after closed")
 			return
 		}
 
+		e.logger.Debugw("received answer for publisher", "answer", sd)
 		if err := e.publisher.SetRemoteDescription(sd); err != nil {
 			e.logger.Errorw("could not set remote description", err)
 		} else {
 			e.logger.Debugw("successfully set publisher answer")
 		}
 	}
+
 	e.client.OnTrickle = func(init webrtc.ICECandidateInit, target livekit.SignalTarget) {
 		if e.closed.Load() {
 			e.logger.Debugw("ignoring trickle after closed")
@@ -354,10 +340,7 @@ func (e *RelayRTCEngine) configure(
 		}
 
 		var err error
-		e.logger.Debugw("remote ICE candidate",
-			"target", target,
-			"candidate", init.Candidate,
-		)
+		e.logger.Debugw("remote ICE candidate", "target", target, "candidate", init.Candidate)
 		if target == livekit.SignalTarget_PUBLISHER {
 			err = e.publisher.AddICECandidate(init)
 		} else if target == livekit.SignalTarget_SUBSCRIBER {
@@ -368,13 +351,14 @@ func (e *RelayRTCEngine) configure(
 			e.logger.Errorw("could not add ICE candidate", err)
 		}
 	}
+
 	e.client.OnOffer = func(sd webrtc.SessionDescription) {
 		if e.closed.Load() {
 			e.logger.Debugw("ignoring SDP offer after closed")
 			return
 		}
 
-		e.logger.Debugw("received offer for subscriber, do not support subscriber")
+		e.logger.Infow("received offer for subscriber, do not support subscriber", "sdp", sd)
 		//if err := e.subscriber.SetRemoteDescription(sd); err != nil {
 		//	e.logger.Errorw("could not set remote description", err)
 		//	return

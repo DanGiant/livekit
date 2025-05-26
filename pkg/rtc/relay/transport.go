@@ -299,8 +299,19 @@ func (t *PCTransport) SetRemoteDescription(sd webrtc.SessionDescription) error {
 	}
 
 	if err := t.pc.SetRemoteDescription(sd); err != nil {
-		t.lock.Unlock()
-		return err
+		//t.lock.Unlock()
+		//return err
+
+		// Pion will call RTPSender.Send method for each new added DownTrack, and return error if the DownTrack.Bind
+		// returns error. In case of DownTrack.Bind returns ErrUnsupportedCodec, the signal state will be stable
+		// as negotiation is already completed before start RTPSenders,
+		// and the PeerConnection state can be recovered by next negotiation which will be triggered
+		// by the SubscriptionManager unsubscribe the failure DownTrack. So don't treat this error as negotiation failure.
+
+		if !errors.Is(err, webrtc.ErrUnsupportedCodec) {
+			t.lock.Unlock()
+			return err
+		}
 	}
 
 	if t.currentOfferIceCredential == "" || offerRestartICE {
@@ -372,29 +383,36 @@ func (t *PCTransport) isRemoteOfferRestartICE(sd webrtc.SessionDescription) (str
 
 func (t *PCTransport) Negotiate() {
 	t.debouncedNegotiate(func() {
+		t.log.Infow("Negotiate call createAndSendOffer")
 		t.createAndSendOffer(nil)
 	})
 }
 
 func (t *PCTransport) createAndSendOffer(options *webrtc.OfferOptions) error {
+	t.log.Infow("createAndSendOffer begin")
 	if t.OnOffer == nil {
+		t.log.Infow("createAndSendOffer exits when OnOffer is not set")
 		return nil
 	}
 	t.lock.Lock()
 	defer t.lock.Unlock()
 
 	if t.closed {
-		t.log.Debugw("aborting Offer since transport is closed")
+		t.log.Infow("aborting Offer since transport is closed")
 		return ErrAborted
 	}
 
 	iceRestart := options != nil && options.ICERestart
+
+	t.log.Infow("ice gather state", "ICEGatheringState", t.pc.ICEGatheringState().String(),
+		"iceRestart", iceRestart)
+
 	if iceRestart {
 		if t.pc.ICEGatheringState() == webrtc.ICEGatheringStateGathering {
 			t.restartAfterGathering = true
 			return nil
 		}
-		t.log.Debugw("restarting ICE")
+		t.log.Infow("restarting ICE")
 	}
 	if t.pc.SignalingState() == webrtc.SignalingStateHaveLocalOffer {
 		if iceRestart {
@@ -410,13 +428,14 @@ func (t *PCTransport) createAndSendOffer(options *webrtc.OfferOptions) error {
 		}
 	}
 
-	t.log.Debugw("starting to negotiate")
+	t.log.Infow("starting to negotiate")
 	offer, err := t.pc.CreateOffer(options)
-	t.log.Debugw("create offer", "offer", offer.SDP)
 	if err != nil {
 		t.log.Errorw("could not negotiate", err)
 		return err
 	}
+
+	t.log.Infow("create offer", "offer", offer.SDP)
 	if err := t.pc.SetLocalDescription(offer); err != nil {
 		t.log.Errorw("could not set local description", err)
 		return err

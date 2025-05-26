@@ -2,6 +2,7 @@
 package typesfakes
 
 import (
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"sync"
 
 	"github.com/livekit/livekit-server/pkg/rtc/types"
@@ -405,6 +406,10 @@ func (fake *FakeLocalMediaTrack) AddSubscriber(arg1 types.LocalParticipant) (typ
 		return ret.result1, ret.result2
 	}
 	return fakeReturns.result1, fakeReturns.result2
+}
+
+func (fake *FakeLocalMediaTrack) AddRelay(arg1 *relay.RelayParticipant) (types.RelayedTrack, error) {
+	return nil, nil
 }
 
 func (fake *FakeLocalMediaTrack) AddSubscriberCallCount() int {
@@ -1724,6 +1729,10 @@ func (fake *FakeLocalMediaTrack) RemoveSubscriber(arg1 livekit.ParticipantID, ar
 	if stub != nil {
 		fake.RemoveSubscriberStub(arg1, arg2)
 	}
+}
+
+func (fake *FakeLocalMediaTrack) RemoveRelay(arg1 livekit.NodeID, arg2 bool) {
+
 }
 
 func (fake *FakeLocalMediaTrack) RemoveSubscriberCallCount() int {

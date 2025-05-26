@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"sort"
 	"strings"
 	"sync"
@@ -47,6 +48,8 @@ const (
 var (
 	ErrNotOpen    = errors.New("track is not open")
 	ErrNoReceiver = errors.New("cannot subscribe without a receiver in place")
+
+	ErrCannotOpenLocalTrack = errors.New("cannot open local track for relay")
 )
 
 // ------------------------------------------------------
@@ -98,14 +101,33 @@ func (r *simulcastReceiver) AddDownTrack(track sfu.TrackSender) error {
 	return err
 }
 
+func (r *simulcastReceiver) AddRelayDownTrack(track sfu.RelayTrackSender) error {
+	logger.Infow("simulcastReceiver AddRelayDownTrack")
+
+	r.lock.Lock()
+	if rt := r.regressTo; rt != nil {
+		r.lock.Unlock()
+		// AddRelayDownTrack could be called in RelayDownTrack.OnBinding callback, use a go-routine to avoid deadlock
+		go track.SetReceiver(rt)
+		return nil
+	}
+	err := r.TrackReceiver.AddRelayDownTrack(track)
+	r.lock.Unlock()
+	return err
+}
+
 func (r *simulcastReceiver) RegressTo(receiver sfu.TrackReceiver) {
 	r.lock.Lock()
 	r.regressTo = receiver
 	dts := r.GetDownTracks()
+	rdts := r.GetRelayDownTracks()
 	r.lock.Unlock()
 
 	for _, dt := range dts {
 		dt.SetReceiver(receiver)
+	}
+	for _, rdt := range rdts {
+		rdt.SetReceiver(receiver)
 	}
 }
 
@@ -147,6 +169,7 @@ type MediaTrackReceiver struct {
 	onCodecRegression   func(old, new webrtc.RTPCodecParameters)
 
 	*MediaTrackSubscriptions
+	*MediaTrackRelays
 }
 
 func NewMediaTrackReceiver(params MediaTrackReceiverParams, ti *livekit.TrackInfo) *MediaTrackReceiver {
@@ -165,6 +188,15 @@ func NewMediaTrackReceiver(params MediaTrackReceiverParams, ti *livekit.TrackInf
 		Logger:           params.Logger,
 	})
 	t.MediaTrackSubscriptions.OnDownTrackCreated(t.onDownTrackCreated)
+
+	t.MediaTrackRelays = NewMediaTrackRelays(MediaTrackRelaysParams{
+		MediaTrack:       params.MediaTrack,
+		ReceiverConfig:   params.ReceiverConfig,
+		SubscriberConfig: params.SubscriberConfig,
+		Telemetry:        params.Telemetry,
+		Logger:           params.Logger,
+	})
+	t.MediaTrackRelays.OnRelayDownTrackCreated(t.onRelayDownTrackCreated)
 
 	if ti.Muted {
 		t.SetMuted(true)
@@ -923,6 +955,16 @@ func (t *MediaTrackReceiver) onDownTrackCreated(downTrack *sfu.DownTrack) {
 	}
 }
 
+func (t *MediaTrackReceiver) onRelayDownTrackCreated(downTrack *sfu.RelayDownTrack) {
+	//if t.Kind() == livekit.TrackType_AUDIO {
+	//	downTrack.AddReceiverReportListener(func(dt *sfu.DownTrack, rr *rtcp.ReceiverReport) {
+	//		if t.onMediaLossFeedback != nil {
+	//			t.onMediaLossFeedback(dt, rr)
+	//		}
+	//	})
+	//}
+}
+
 func (t *MediaTrackReceiver) DebugInfo() map[string]interface{} {
 	info := map[string]interface{}{
 		"ID":       t.ID(),
@@ -1013,3 +1055,121 @@ func (t *MediaTrackReceiver) GetTrackStats() *livekit.RTPStats {
 
 	return rtpstats.AggregateRTPStats(stats)
 }
+
+// AddRelay add node to current mediaTrack to relay
+func (t *MediaTrackReceiver) AddRelay(rp *relay.RelayParticipant) (types.RelayedTrack, error) {
+	// may return errAlreadyRelayed
+
+	t.lock.RLock()
+	if t.state != mediaTrackReceiverStateOpen {
+		t.lock.RUnlock()
+		return nil, ErrNotOpen
+	}
+
+	receivers := t.receivers
+	potentialCodecs := make([]webrtc.RTPCodecParameters, len(t.potentialCodecs))
+	copy(potentialCodecs, t.potentialCodecs)
+	t.lock.RUnlock()
+
+	if len(receivers) == 0 {
+		// cannot add, no receiver
+		return nil, ErrNoReceiver
+	}
+
+	for _, receiver := range receivers {
+		if receiver.IsRegressed() {
+			continue
+		}
+
+		codec := receiver.Codec()
+		var found bool
+		for _, pc := range potentialCodecs {
+			if mime.IsMimeTypeStringEqual(codec.MimeType, pc.MimeType) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			potentialCodecs = append(potentialCodecs, codec)
+		}
+	}
+
+	streamId := string(t.PublisherID())
+	//if sub.ProtocolVersion().SupportsPackedStreamId() {
+	//	// when possible, pack both IDs in streamID to allow new streams to be generated
+	//	// react-native-webrtc still uses stream based APIs and require this
+	//	streamId = PackStreamID(t.PublisherID(), t.ID())
+	//}
+
+	tLogger := LoggerWithTrack(rp.GetLogger(), t.ID(), t.params.IsRelayed)
+	wr := NewWrappedReceiver(WrappedReceiverParams{
+		Receivers:      receivers,
+		TrackID:        t.ID(),
+		StreamId:       streamId,
+		UpstreamCodecs: potentialCodecs,
+		Logger:         tLogger,
+		DisableRed:     t.TrackInfo().GetDisableRed() || !t.params.AudioConfig.ActiveREDEncoding,
+	})
+
+	relayedTrack, err := t.MediaTrackRelays.AddRelay(rp, wr)
+
+	// media track could have been closed while adding relay to remote node
+	remove := false
+	isExpectedToResume := false
+	t.lock.RLock()
+	if t.state != mediaTrackReceiverStateOpen {
+		isExpectedToResume = t.isExpectedToResume
+		remove = true
+	}
+	t.lock.RUnlock()
+
+	if remove {
+		_ = t.MediaTrackRelays.RemoveRelay(rp.DestNodeID(), isExpectedToResume)
+		return nil, ErrNotOpen
+	}
+
+	return relayedTrack, err
+}
+
+// RemoveRelay removes remote note from participant relay
+// stop all forwarders to the client
+func (t *MediaTrackReceiver) RemoveRelay(destNodeID livekit.NodeID, isExpectedToResume bool) {
+	_ = t.MediaTrackRelays.RemoveRelay(destNodeID, isExpectedToResume)
+}
+
+//func (t *MediaTrackReceiver) removeAllSubscribersForMime(mime mime.MimeType, isExpectedToResume bool) {
+//	t.params.Logger.Debugw("removing all subscribers for mime", "mime", mime)
+//	for _, subscriberID := range t.MediaTrackSubscriptions.GetAllSubscribersForMime(mime) {
+//		t.RemoveSubscriber(subscriberID, isExpectedToResume)
+//	}
+//}
+//
+//func (t *MediaTrackReceiver) RevokeDisallowedSubscribers(allowedSubscriberIdentities []livekit.ParticipantIdentity) []livekit.ParticipantIdentity {
+//	var revokedSubscriberIdentities []livekit.ParticipantIdentity
+//
+//	// LK-TODO: large number of subscribers needs to be solved for this loop
+//	for _, subTrack := range t.MediaTrackSubscriptions.getAllSubscribedTracks() {
+//		if IsParticipantExemptFromTrackPermissionsRestrictions(subTrack.Subscriber()) {
+//			continue
+//		}
+//
+//		found := false
+//		for _, allowedIdentity := range allowedSubscriberIdentities {
+//			if subTrack.SubscriberIdentity() == allowedIdentity {
+//				found = true
+//				break
+//			}
+//		}
+//
+//		if !found {
+//			t.params.Logger.Infow("revoking subscription",
+//				"subscriber", subTrack.SubscriberIdentity(),
+//				"subscriberID", subTrack.SubscriberID(),
+//			)
+//			t.RemoveSubscriber(subTrack.SubscriberID(), false)
+//			revokedSubscriberIdentities = append(revokedSubscriberIdentities, subTrack.SubscriberIdentity())
+//		}
+//	}
+//
+//	return revokedSubscriberIdentities
+//}

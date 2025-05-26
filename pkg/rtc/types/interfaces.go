@@ -16,6 +16,7 @@ package types
 
 import (
 	"fmt"
+	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"time"
 
 	"github.com/pion/rtcp"
@@ -364,6 +365,7 @@ type LocalParticipant interface {
 	CanPublishSource(source livekit.TrackSource) bool
 	CanSubscribe() bool
 	CanPublishData() bool
+	CanRelay() bool
 
 	// PeerConnection
 	AddICECandidate(candidate webrtc.ICECandidateInit, target livekit.SignalTarget)
@@ -400,6 +402,10 @@ type LocalParticipant interface {
 	IsSubscribedTo(sid livekit.ParticipantID) bool
 
 	GetConnectionQuality() *livekit.ConnectionQualityInfo
+
+	// relay participant between nodes
+	AddRelayParticipantToNode(nodeID livekit.NodeID, relayParticipant *relay.RelayParticipant) error
+	RemoveRelayParticipantFromNode(nodeID livekit.NodeID) (*relay.RelayParticipant, error)
 
 	// server sent messages
 	SendJoinResponse(joinResponse *livekit.JoinResponse) error
@@ -526,6 +532,10 @@ type MediaTrack interface {
 	GetNumSubscribers() int
 	OnTrackSubscribed()
 
+	// relays
+	AddRelay(relayParticipant *relay.RelayParticipant) (RelayedTrack, error)
+	RemoveRelay(destNodeID livekit.NodeID, isExpectedToResume bool)
+
 	// returns quality information that's appropriate for width & height
 	GetQualityForDimension(width, height uint32) livekit.VideoQuality
 
@@ -578,6 +588,30 @@ type SubscribedTrack interface {
 	// selects appropriate video layer according to subscriber preferences
 	UpdateVideoLayer()
 	NeedsNegotiation() bool
+}
+
+type RelayedTrack interface {
+	//AddOnBind(f func(error))
+	//IsBound() bool
+	Close(isExpectedToResume bool)
+	OnClose(f func(isExpectedToResume bool))
+	ID() livekit.TrackID
+	PublisherID() livekit.ParticipantID
+	PublisherIdentity() livekit.ParticipantIdentity
+	PublisherVersion() uint32
+	DestNodeID() livekit.NodeID
+	DownTrack() *sfu.RelayDownTrack
+	MediaTrack() MediaTrack
+	RTPSender() *webrtc.RTPSender
+	GetLocalPublication() *relay.LocalTrackPublication
+	IsSimulcast() bool
+	GetRelayedQualities() []SubscribedCodecQuality
+	//IsMuted() bool
+	//SetPublisherMuted(muted bool)
+	//UpdateSubscriberSettings(settings *livekit.UpdateTrackSettings, isImmediate bool)
+	// selects appropriate video layer according to subscriber preferences
+	//UpdateVideoLayer()
+	//NeedsNegotiation() bool
 }
 
 type ChangeNotifier interface {

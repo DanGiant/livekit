@@ -47,6 +47,8 @@ type RedReceiver struct {
 	closed            atomic.Bool
 	pktBuff           [maxRedCount]*rtp.Packet
 	redPayloadBuf     [mtuSize]byte
+
+	relayDownTrackSpreader *RelayDownTrackSpreader
 }
 
 func NewRedReceiver(receiver TrackReceiver, dsp DownTrackSpreaderParams) *RedReceiver {
@@ -54,17 +56,23 @@ func NewRedReceiver(receiver TrackReceiver, dsp DownTrackSpreaderParams) *RedRec
 		TrackReceiver:     receiver,
 		downTrackSpreader: NewDownTrackSpreader(dsp),
 		logger:            dsp.Logger,
+
+		relayDownTrackSpreader: NewRelayDownTrackSpreader(dsp),
 	}
 }
 
 func (r *RedReceiver) ForwardRTP(pkt *buffer.ExtPacket, spatialLayer int32) int {
 	// encode RED payload from primary payload and forward to downtracks
-	if r.downTrackSpreader.DownTrackCount() == 0 {
+	if r.downTrackSpreader.DownTrackCount() == 0 && r.relayDownTrackSpreader.RelayDownTrackCount() == 0 {
 		return 0
 	}
 
 	// fallback to primary codec if payload size exceeds redundant block length
 	if len(pkt.Packet.Payload) >= maxRedPayload {
+		r.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+			_ = dt.WriteRTP(pkt, spatialLayer)
+		})
+
 		return r.downTrackSpreader.Broadcast(func(dt TrackSender) {
 			_ = dt.WriteRTP(pkt, spatialLayer)
 		})
@@ -84,6 +92,11 @@ func (r *RedReceiver) ForwardRTP(pkt *buffer.ExtPacket, spatialLayer int32) int 
 
 	// not modify the ExtPacket.RawPacket here for performance since it is not used by the DownTrack,
 	// otherwise it should be set to the correct value (marshal the primary rtp packet)
+
+	r.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+		_ = dt.WriteRTP(pkt, spatialLayer)
+	})
+
 	return r.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		_ = dt.WriteRTP(&pPkt, spatialLayer)
 	})
@@ -116,14 +129,47 @@ func (r *RedReceiver) GetDownTracks() []TrackSender {
 	return r.downTrackSpreader.GetDownTracks()
 }
 
+func (r *RedReceiver) AddRelayDownTrack(track RelayTrackSender) error {
+	logger.Debugw("RedReceiver AddRelayDownTrack")
+
+	if r.closed.Load() {
+		return ErrReceiverClosed
+	}
+
+	if r.relayDownTrackSpreader.HasRelayDownTrack(track.RelayDestNodeID()) {
+		r.logger.Infow("destNodeID already exists, replacing relay down track", "destNodeID", track.RelayDestNodeID())
+	}
+
+	r.relayDownTrackSpreader.Store(track)
+	r.logger.Debugw("red receiver relay down track added", "destNodeID", track.RelayDestNodeID())
+	return nil
+}
+
+func (r *RedReceiver) DeleteRelayDownTrack(destNodeID livekit.NodeID) {
+	if r.closed.Load() {
+		return
+	}
+
+	r.relayDownTrackSpreader.Free(destNodeID)
+	r.logger.Debugw("red receiver relay down track deleted", "destNodeID", destNodeID)
+}
+
+func (r *RedReceiver) GetRelayDownTracks() []RelayTrackSender {
+	return r.relayDownTrackSpreader.GetRelayDownTracks()
+}
+
 func (r *RedReceiver) ResyncDownTracks() {
 	r.downTrackSpreader.Broadcast(func(dt TrackSender) {
 		dt.Resync()
 	})
+
+	//r.relayDownTrackSpreader.Broadcast(func(dt RelayTrackSender) {
+	//	dt.Resync()
+	//})
 }
 
 func (r *RedReceiver) CanClose() bool {
-	return r.closed.Load() || r.downTrackSpreader.DownTrackCount() == 0
+	return r.closed.Load() || (r.downTrackSpreader.DownTrackCount() == 0 && r.relayDownTrackSpreader.RelayDownTrackCount() == 0)
 }
 
 func (r *RedReceiver) IsClosed() bool {
@@ -133,6 +179,7 @@ func (r *RedReceiver) IsClosed() bool {
 func (r *RedReceiver) Close() {
 	r.closed.Store(true)
 	closeTrackSenders(r.downTrackSpreader.ResetAndGetDownTracks())
+	closeRelayTrackSenders(r.relayDownTrackSpreader.ResetAndGetRelayDownTracks())
 }
 
 func (r *RedReceiver) ReadRTP(buf []byte, layer uint8, esn uint64) (int, error) {

@@ -22,7 +22,7 @@ import (
 type RelaySessionHandler interface {
 	Logger(ctx context.Context) logger.Logger
 
-	HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error
+	HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID, isServerNode bool) error
 
 	HandleRoomOffline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error
 
@@ -45,25 +45,42 @@ func (s *defaultRelaySessionHandler) Logger(ctx context.Context) logger.Logger {
 	return logger.GetLogger()
 }
 
-func (s *defaultRelaySessionHandler) HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error {
+func (s *defaultRelaySessionHandler) HandleRoomOnline(ctx context.Context, roomName livekit.RoomName, remoteNode livekit.NodeID, isServerNode bool) error {
+
+	logger.Infow("HandleRoomOnline", "roomName", roomName,
+		"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
+
+	if s.roomManager.currentNode.NodeID() == remoteNode {
+		logger.Infow("local node is the remote node", "roomName", roomName,
+			"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
+		return ErrRoomNotFound
+	}
+
 	room, err := s.roomManager.GetRoomByName(context.Background(), roomName)
 	if err != nil {
+		logger.Infow("room not found in the node", "roomName", roomName,
+			"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
 		return ErrRoomNotFound
 	}
 	defer room.Release()
+
+	if isServerNode {
+		logger.Infow("add remote node", "roomName", roomName,
+			"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
+		s.roomManager.AddRemoteNodeToRoom(ctx, roomName, remoteNode)
+	}
 
 	return nil
 }
 
-func (s *defaultRelaySessionHandler) HandleRoomOffline(ctx context.Context, roomName livekit.RoomName, fromNode livekit.NodeID) error {
+func (s *defaultRelaySessionHandler) HandleRoomOffline(ctx context.Context, roomName livekit.RoomName, remoteNode livekit.NodeID) error {
 	room, err := s.roomManager.GetRoomByName(context.Background(), roomName)
 	if err != nil {
 		return ErrRoomNotFound
 	}
 	defer room.Release()
 
-	//s.roomManager.RemoveRemoteParticipantsFromNode(fromNode)
-
+	s.roomManager.RemoveRemoteNodeFromRoom(ctx, roomName, remoteNode)
 	return nil
 }
 
@@ -137,7 +154,7 @@ func (s *defaultRelaySessionHandler) HandleRelaySession(
 //counterfeiter:generate . SignalClient
 type CloudRelaySignalClient interface {
 	ActiveCount() int
-	RoomOnline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error)
+	RoomOnline(ctx context.Context, roomName livekit.RoomName, isServerNode bool) (nodes *[]livekit.NodeID, err error)
 	RoomOffline(ctx context.Context, roomName livekit.RoomName) (nodes *[]livekit.NodeID, err error)
 	StartParticipantRelaySignal(ctx context.Context, roomName livekit.RoomName, toNode livekit.NodeID, pri routing.ParticipantRelayInit) (connectionID livekit.ConnectionID, reqSink routing.MessageSink, resSource routing.MessageSource, err error)
 }
@@ -183,10 +200,11 @@ func (r *cloudRelayServiceSignalClient) ActiveCount() int {
 	return int(r.active.Load())
 }
 
-func (r *cloudRelayServiceSignalClient) RoomOnline(ctx context.Context, roomName livekit.RoomName) (*[]livekit.NodeID, error) {
+func (r *cloudRelayServiceSignalClient) RoomOnline(ctx context.Context, roomName livekit.RoomName, isServerNode bool) (*[]livekit.NodeID, error) {
 	req := &rpc.RoomOnlineRequest{
-		RoomName: string(roomName),
-		NodeId:   string(r.localNode),
+		RoomName:     string(roomName),
+		NodeId:       string(r.localNode),
+		IsServerNode: isServerNode,
 	}
 	res, err := r.client.RoomOnline(context.Background(), rpc.RoomTopic("room.*"), req)
 	if err != nil {

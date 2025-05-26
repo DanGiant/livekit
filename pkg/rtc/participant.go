@@ -215,6 +215,7 @@ type ParticipantImpl struct {
 	*TransportManager
 	*UpTrackManager
 	*SubscriptionManager
+	*RelayManager
 
 	icQueue [2]atomic.Pointer[webrtc.ICECandidate]
 
@@ -335,6 +336,7 @@ func NewParticipant(params ParticipantParams) (*ParticipantImpl, error) {
 
 	p.setupUpTrackManager()
 	p.setupSubscriptionManager()
+	p.setupRelayManager()
 	p.setupMetrics()
 
 	return p, nil
@@ -1096,6 +1098,7 @@ func (p *ParticipantImpl) Close(sendLeave bool, reason types.ParticipantCloseRea
 	go func() {
 		p.SubscriptionManager.Close(isExpectedToResume)
 		p.TransportManager.Close()
+		p.RelayManager.Close()
 
 		p.metricsCollector.Stop()
 		p.metricsReporter.Stop()
@@ -1333,6 +1336,10 @@ func (p *ParticipantImpl) CanPublishData() bool {
 	return p.grants.Load().Video.GetCanPublishData()
 }
 
+func (p *ParticipantImpl) CanRelay() bool {
+	return !p.IsRemoteRelay() && !p.IsRecorder() && !p.IsDependent()
+}
+
 func (p *ParticipantImpl) Hidden() bool {
 	return p.grants.Load().Video.Hidden
 }
@@ -1344,6 +1351,7 @@ func (p *ParticipantImpl) CanSubscribeMetrics() bool {
 func (p *ParticipantImpl) Verify() bool {
 	state := p.State()
 	isActive := state != livekit.ParticipantInfo_JOINING && state != livekit.ParticipantInfo_JOINED
+	p.logger.Infow("verify participant", "state", state, "OneShotMode", p.params.UseOneShotSignallingMode, "isActive", isActive)
 	if p.params.UseOneShotSignallingMode {
 		isActive = isActive && p.TransportManager.HasPublisherEverConnected()
 	}
@@ -1625,6 +1633,17 @@ func (p *ParticipantImpl) setupSubscriptionManager() {
 	})
 }
 
+func (p *ParticipantImpl) setupRelayManager() {
+	p.RelayManager = NewRelayManager(RelayManagerParams{
+		Participant:   p,
+		Logger:        p.relayLogger.WithoutSampler(),
+		TrackResolver: p.params.TrackResolver,
+		Telemetry:     p.params.Telemetry,
+		//RelayLimitVideo: 10,
+		//RelayLimitAudio: 10,
+	})
+}
+
 func (p *ParticipantImpl) MetricsCollectorTimeToCollectMetrics() {
 	publisherRTT, ok := p.TransportManager.GetPublisherRTT()
 	if ok {
@@ -1827,6 +1846,14 @@ func (p *ParticipantImpl) onMediaTrack(rtcTrack *webrtc.TrackRemote, rtpReceiver
 		if onTrackUpdated := p.getOnTrackUpdated(); onTrackUpdated != nil {
 			onTrackUpdated(p, publishedTrack)
 		}
+	}
+
+	if !p.IsRemoteRelay() {
+		// TODO: remove the kind is VIDEO check
+		//if publishedTrack.Kind() == livekit.TrackType_VIDEO {
+		//	p.AddTrackRelayToAllNodes(publishedTrack.ID())
+		//}
+		p.AddTrackRelayToAllNodes(publishedTrack.ID())
 	}
 }
 
