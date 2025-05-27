@@ -330,17 +330,17 @@ func (r *cloudRelayServiceSignalClient) StartParticipantRelaySignal(
 
 	stream, err := r.client.RoomSignalRelay(ctx, toNode)
 	if err != nil {
-		log.Fatalf("failed to start cloud relay signal stream: %v", err)
-		//prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
-		return
+		l.Errorw("failed to start cloud relay signal stream", err)
+		prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
+		return connectionID, nil, nil, err
 	}
 
 	err = stream.Send(&rpc.RoomSignalRelayRequest{StartRelaySession: srs})
 	if err != nil {
 		stream.Close(err)
-		log.Fatalf("failed to send RoomSignalRelayRequest: %v", err)
-		//prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
-		return
+		l.Errorw("failed to send RoomSignalRelayRequest", err)
+		prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
+		return connectionID, nil, nil, err
 	}
 
 	sink := routing.NewSignalMessageSink(routing.SignalSinkParams[*rpc.RoomSignalRelayRequest, *rpc.RoomSignalRelayResponse]{
