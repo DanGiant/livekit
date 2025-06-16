@@ -217,6 +217,15 @@ type FakeTelemetryService struct {
 		arg4 error
 		arg5 bool
 	}
+	TrackRelayFailedStub        func(context.Context, livekit.ParticipantID, livekit.TrackID, error, bool)
+	trackRelayFailedMutex       sync.RWMutex
+	trackRelayFailedArgsForCall []struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 livekit.TrackID
+		arg4 error
+		arg5 bool
+	}
 	TrackSubscribeRTPStatsStub        func(context.Context, livekit.ParticipantID, livekit.TrackID, mime.MimeType, *livekit.RTPStats)
 	trackSubscribeRTPStatsMutex       sync.RWMutex
 	trackSubscribeRTPStatsArgsForCall []struct {
@@ -233,9 +242,25 @@ type FakeTelemetryService struct {
 		arg2 livekit.ParticipantID
 		arg3 *livekit.TrackInfo
 	}
+	TrackRelayRequestedStub        func(context.Context, livekit.ParticipantID, *livekit.TrackInfo)
+	trackRelayRequestedMutex       sync.RWMutex
+	trackRelayRequestedArgsForCall []struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+	}
 	TrackSubscribedStub        func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, *livekit.ParticipantInfo, bool)
 	trackSubscribedMutex       sync.RWMutex
 	trackSubscribedArgsForCall []struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+		arg4 *livekit.ParticipantInfo
+		arg5 bool
+	}
+	TrackRelayedStub        func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, *livekit.ParticipantInfo, bool)
+	trackRelayedMutex       sync.RWMutex
+	trackRelayedArgsForCall []struct {
 		arg1 context.Context
 		arg2 livekit.ParticipantID
 		arg3 *livekit.TrackInfo
@@ -261,6 +286,14 @@ type FakeTelemetryService struct {
 	TrackUnsubscribedStub        func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, bool)
 	trackUnsubscribedMutex       sync.RWMutex
 	trackUnsubscribedArgsForCall []struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+		arg4 bool
+	}
+	TrackRelayRemovedStub        func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, bool)
+	trackRelayRemovedMutex       sync.RWMutex
+	trackRelayRemovedArgsForCall []struct {
 		arg1 context.Context
 		arg2 livekit.ParticipantID
 		arg3 *livekit.TrackInfo
@@ -1290,6 +1323,42 @@ func (fake *FakeTelemetryService) TrackSubscribeFailedArgsForCall(i int) (contex
 	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
 }
 
+func (fake *FakeTelemetryService) TrackRelayFailed(arg1 context.Context, arg2 livekit.ParticipantID, arg3 livekit.TrackID, arg4 error, arg5 bool)  {
+	fake.trackRelayFailedMutex.Lock()
+	fake.trackRelayFailedArgsForCall = append(fake.trackRelayFailedArgsForCall, struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 livekit.TrackID
+		arg4 error
+		arg5 bool
+	}{arg1, arg2, arg3, arg4, arg5})
+	stub := fake.TrackRelayFailedStub
+	fake.recordInvocation("TrackRelayFailed", []interface{}{arg1, arg2, arg3, arg4, arg5})
+	fake.trackRelayFailedMutex.Unlock()
+	if stub != nil {
+		fake.TrackRelayFailedStub(arg1, arg2, arg3, arg4, arg5)
+	}
+}
+
+func (fake *FakeTelemetryService) TrackRelayFailedCallCount() int {
+	fake.trackRelayFailedMutex.RLock()
+	defer fake.trackRelayFailedMutex.RUnlock()
+	return len(fake.trackRelayFailedArgsForCall)
+}
+
+func (fake *FakeTelemetryService) TrackRelayFailedCalls(stub func(context.Context, livekit.ParticipantID, livekit.TrackID, error, bool)) {
+	fake.trackRelayFailedMutex.Lock()
+	defer fake.trackRelayFailedMutex.Unlock()
+	fake.TrackRelayFailedStub = stub
+}
+
+func (fake *FakeTelemetryService) TrackRelayFailedArgsForCall(i int) (context.Context, livekit.ParticipantID, livekit.TrackID, error, bool) {
+	fake.trackRelayFailedMutex.RLock()
+	defer fake.trackRelayFailedMutex.RUnlock()
+	argsForCall := fake.trackRelayFailedArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+}
+
 func (fake *FakeTelemetryService) TrackSubscribeRTPStats(arg1 context.Context, arg2 livekit.ParticipantID, arg3 livekit.TrackID, arg4 mime.MimeType, arg5 *livekit.RTPStats) {
 	fake.trackSubscribeRTPStatsMutex.Lock()
 	fake.trackSubscribeRTPStatsArgsForCall = append(fake.trackSubscribeRTPStatsArgsForCall, struct {
@@ -1360,6 +1429,40 @@ func (fake *FakeTelemetryService) TrackSubscribeRequestedArgsForCall(i int) (con
 	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
 }
 
+func (fake *FakeTelemetryService) TrackRelayRequested(arg1 context.Context, arg2 livekit.ParticipantID, arg3 *livekit.TrackInfo) {
+	fake.trackRelayRequestedMutex.Lock()
+	fake.trackRelayRequestedArgsForCall = append(fake.trackRelayRequestedArgsForCall, struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+	}{arg1, arg2, arg3})
+	stub := fake.TrackRelayRequestedStub
+	fake.recordInvocation("TrackRelayRequested", []interface{}{arg1, arg2, arg3})
+	fake.trackRelayRequestedMutex.Unlock()
+	if stub != nil {
+		fake.TrackRelayRequestedStub(arg1, arg2, arg3)
+	}
+}
+
+func (fake *FakeTelemetryService) TrackRelayRequestedCallCount() int {
+	fake.trackRelayRequestedMutex.RLock()
+	defer fake.trackRelayRequestedMutex.RUnlock()
+	return len(fake.trackRelayRequestedArgsForCall)
+}
+
+func (fake *FakeTelemetryService) TrackRelayRequestedCalls(stub func(context.Context, livekit.ParticipantID, *livekit.TrackInfo)) {
+	fake.trackRelayRequestedMutex.Lock()
+	defer fake.trackRelayRequestedMutex.Unlock()
+	fake.TrackRelayRequestedStub = stub
+}
+
+func (fake *FakeTelemetryService) TrackRelayRequestedArgsForCall(i int) (context.Context, livekit.ParticipantID, *livekit.TrackInfo) {
+	fake.trackRelayRequestedMutex.RLock()
+	defer fake.trackRelayRequestedMutex.RUnlock()
+	argsForCall := fake.trackRelayRequestedArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3
+}
+
 func (fake *FakeTelemetryService) TrackSubscribed(arg1 context.Context, arg2 livekit.ParticipantID, arg3 *livekit.TrackInfo, arg4 *livekit.ParticipantInfo, arg5 bool) {
 	fake.trackSubscribedMutex.Lock()
 	fake.trackSubscribedArgsForCall = append(fake.trackSubscribedArgsForCall, struct {
@@ -1393,6 +1496,42 @@ func (fake *FakeTelemetryService) TrackSubscribedArgsForCall(i int) (context.Con
 	fake.trackSubscribedMutex.RLock()
 	defer fake.trackSubscribedMutex.RUnlock()
 	argsForCall := fake.trackSubscribedArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+}
+
+func (fake *FakeTelemetryService) TrackRelayed(arg1 context.Context, arg2 livekit.ParticipantID, arg3 *livekit.TrackInfo, arg4 *livekit.ParticipantInfo, arg5 bool) {
+	fake.trackRelayedMutex.Lock()
+	fake.trackRelayedArgsForCall = append(fake.trackRelayedArgsForCall, struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+		arg4 *livekit.ParticipantInfo
+		arg5 bool
+	}{arg1, arg2, arg3, arg4, arg5})
+	stub := fake.TrackRelayedStub
+	fake.recordInvocation("TrackRelayed", []interface{}{arg1, arg2, arg3, arg4, arg5})
+	fake.trackRelayedMutex.Unlock()
+	if stub != nil {
+		fake.TrackRelayedStub(arg1, arg2, arg3, arg4, arg5)
+	}
+}
+
+func (fake *FakeTelemetryService) TrackRelayedCallCount() int {
+	fake.trackRelayedMutex.RLock()
+	defer fake.trackRelayedMutex.RUnlock()
+	return len(fake.trackRelayedArgsForCall)
+}
+
+func (fake *FakeTelemetryService) TrackRelayedCalls(stub func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, *livekit.ParticipantInfo, bool)) {
+	fake.trackRelayedMutex.Lock()
+	defer fake.trackRelayedMutex.Unlock()
+	fake.TrackRelayedStub = stub
+}
+
+func (fake *FakeTelemetryService) TrackRelayedArgsForCall(i int) (context.Context, livekit.ParticipantID, *livekit.TrackInfo, *livekit.ParticipantInfo, bool) {
+	fake.trackRelayedMutex.RLock()
+	defer fake.trackRelayedMutex.RUnlock()
+	argsForCall := fake.trackRelayedArgsForCall[i]
 	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
 }
 
@@ -1501,6 +1640,41 @@ func (fake *FakeTelemetryService) TrackUnsubscribedArgsForCall(i int) (context.C
 	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
 }
 
+func (fake *FakeTelemetryService) TrackRelayRemoved(arg1 context.Context, arg2 livekit.ParticipantID, arg3 *livekit.TrackInfo, arg4 bool) {
+	fake.trackRelayRemovedMutex.Lock()
+	fake.trackRelayRemovedArgsForCall = append(fake.trackRelayRemovedArgsForCall, struct {
+		arg1 context.Context
+		arg2 livekit.ParticipantID
+		arg3 *livekit.TrackInfo
+		arg4 bool
+	}{arg1, arg2, arg3, arg4})
+	stub := fake.TrackRelayRemovedStub
+	fake.recordInvocation("TrackRelayRemoved", []interface{}{arg1, arg2, arg3, arg4})
+	fake.trackRelayRemovedMutex.Unlock()
+	if stub != nil {
+		fake.TrackRelayRemovedStub(arg1, arg2, arg3, arg4)
+	}
+}
+
+func (fake *FakeTelemetryService) TrackRelayRemovedCallCount() int {
+	fake.trackRelayRemovedMutex.RLock()
+	defer fake.trackRelayRemovedMutex.RUnlock()
+	return len(fake.trackRelayRemovedArgsForCall)
+}
+
+func (fake *FakeTelemetryService) TrackRelayRemovedCalls(stub func(context.Context, livekit.ParticipantID, *livekit.TrackInfo, bool)) {
+	fake.trackRelayRemovedMutex.Lock()
+	defer fake.trackRelayRemovedMutex.Unlock()
+	fake.TrackRelayRemovedStub = stub
+}
+
+func (fake *FakeTelemetryService) TrackRelayRemovedArgsForCall(i int) (context.Context, livekit.ParticipantID, *livekit.TrackInfo, bool) {
+	fake.trackRelayRemovedMutex.RLock()
+	defer fake.trackRelayRemovedMutex.RUnlock()
+	argsForCall := fake.trackRelayRemovedArgsForCall[i]
+	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+}
+
 func (fake *FakeTelemetryService) Webhook(arg1 context.Context, arg2 *livekit.WebhookInfo) {
 	fake.webhookMutex.Lock()
 	fake.webhookArgsForCall = append(fake.webhookArgsForCall, struct {
@@ -1597,18 +1771,26 @@ func (fake *FakeTelemetryService) Invocations() map[string][][]interface{} {
 	defer fake.trackStatsMutex.RUnlock()
 	fake.trackSubscribeFailedMutex.RLock()
 	defer fake.trackSubscribeFailedMutex.RUnlock()
+	fake.trackRelayFailedMutex.RLock()
+	defer fake.trackRelayFailedMutex.RUnlock()
 	fake.trackSubscribeRTPStatsMutex.RLock()
 	defer fake.trackSubscribeRTPStatsMutex.RUnlock()
 	fake.trackSubscribeRequestedMutex.RLock()
 	defer fake.trackSubscribeRequestedMutex.RUnlock()
+	fake.trackRelayRequestedMutex.RLock()
+	defer fake.trackRelayRequestedMutex.RUnlock()
 	fake.trackSubscribedMutex.RLock()
 	defer fake.trackSubscribedMutex.RUnlock()
+	fake.trackRelayedMutex.RLock()
+	defer fake.trackRelayedMutex.RUnlock()
 	fake.trackUnmutedMutex.RLock()
 	defer fake.trackUnmutedMutex.RUnlock()
 	fake.trackUnpublishedMutex.RLock()
 	defer fake.trackUnpublishedMutex.RUnlock()
 	fake.trackUnsubscribedMutex.RLock()
 	defer fake.trackUnsubscribedMutex.RUnlock()
+	fake.trackRelayRemovedMutex.RLock()
+	defer fake.trackRelayRemovedMutex.RUnlock()
 	fake.webhookMutex.RLock()
 	defer fake.webhookMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}

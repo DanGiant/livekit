@@ -50,6 +50,7 @@ type TelemetryService interface {
 	TrackPublished(ctx context.Context, participantID livekit.ParticipantID, identity livekit.ParticipantIdentity, track *livekit.TrackInfo)
 	// TrackUnpublished - a participant unpublished a track
 	TrackUnpublished(ctx context.Context, participantID livekit.ParticipantID, identity livekit.ParticipantIdentity, track *livekit.TrackInfo, shouldSendEvent bool)
+
 	// TrackSubscribeRequested - a participant requested to subscribe to a track
 	TrackSubscribeRequested(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo)
 	// TrackSubscribed - a participant subscribed to a track successfully
@@ -58,6 +59,16 @@ type TelemetryService interface {
 	TrackUnsubscribed(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo, shouldSendEvent bool)
 	// TrackSubscribeFailed - failure to subscribe to a track
 	TrackSubscribeFailed(ctx context.Context, participantID livekit.ParticipantID, trackID livekit.TrackID, err error, isUserError bool)
+
+	// TrackRelayRequested - a participant requested to relay a track to remote node
+	TrackRelayRequested(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo)
+	// TrackRelayed - a participant relay a track to remote node successfully
+	TrackRelayed(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo, publisher *livekit.ParticipantInfo, shouldSendEvent bool)
+	// TrackRelayRemoved - a participant remove relay of a track to remote node successfully
+	TrackRelayRemoved(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo, shouldSendEvent bool)
+	// TrackRelayFailed - failure to relay a track to remote node
+	TrackRelayFailed(ctx context.Context, participantID livekit.ParticipantID, trackID livekit.TrackID, err error, isUserError bool)
+
 	// TrackMuted - the publisher has muted the Track
 	TrackMuted(ctx context.Context, participantID livekit.ParticipantID, track *livekit.TrackInfo)
 	// TrackUnmuted - the publisher has muted the Track

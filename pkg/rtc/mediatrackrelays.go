@@ -3,6 +3,7 @@ package rtc
 import (
 	"errors"
 	"github.com/livekit/livekit-server/pkg/rtc/relay"
+	"github.com/livekit/livekit-server/pkg/telemetry/prometheus"
 	"sync"
 
 	"github.com/livekit/livekit-server/pkg/sfu/mime"
@@ -172,6 +173,7 @@ func (t *MediaTrackRelays) AddRelay(rp *relay.RelayParticipant, wr *WrappedRecei
 				})
 				if err != nil {
 					t.params.Logger.Errorw("add relay: publish simulcast track failed", err, "Track", track.ID())
+					prometheus.ServiceOperationCounter.WithLabelValues("relay_track", "failure", "").Add(1)
 					return nil, err
 				}
 				t.params.Logger.Infow("add relay for track: publish simulcast track success", "Track", track.ID())
@@ -215,6 +217,7 @@ func (t *MediaTrackRelays) AddRelay(rp *relay.RelayParticipant, wr *WrappedRecei
 			if err != nil {
 				t.params.Logger.Errorw("add relay: publish relay track failed", err,
 					"destNodeID", rp.DestNodeID(), "Track", track.ID())
+				prometheus.ServiceOperationCounter.WithLabelValues("relay_track", "failure", "").Add(1)
 				return nil, err
 			}
 			t.params.Logger.Infow("add relay for track: publish track success",
@@ -238,6 +241,9 @@ func (t *MediaTrackRelays) AddRelay(rp *relay.RelayParticipant, wr *WrappedRecei
 		//SupportsCodecChange:            rp.SupportsCodecChange(),
 	})
 	if err != nil {
+		t.params.Logger.Errorw("add relay: create relay downtrack failed", err,
+			"destNodeID", rp.DestNodeID(), "Track", track.ID())
+		prometheus.ServiceOperationCounter.WithLabelValues("relay_track", "failure", "").Add(1)
 		return nil, err
 	}
 
@@ -324,6 +330,7 @@ func (t *MediaTrackRelays) AddRelay(rp *relay.RelayParticipant, wr *WrappedRecei
 	t.relayedTracks[rp.DestNodeID()] = relayedTrack
 	t.relayedTracksMu.Unlock()
 
+	prometheus.ServiceOperationCounter.WithLabelValues("relay_track", "success", "").Add(1)
 	return relayedTrack, nil
 }
 

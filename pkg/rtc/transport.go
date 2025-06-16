@@ -747,6 +747,8 @@ func (t *PCTransport) handleConnectionFailed(forceShortConn bool) {
 		}
 	}
 
+	prometheus.ServiceOperationCounter.WithLabelValues("peer_connection", "failure", "").Add(1)
+
 	t.params.Handler.OnFailed(isShort, t.GetICEConnectionInfo())
 }
 

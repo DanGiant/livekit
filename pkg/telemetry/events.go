@@ -339,6 +339,76 @@ func (t *telemetryService) TrackUnsubscribed(
 	})
 }
 
+func (t *telemetryService) TrackRelayRequested(
+	ctx context.Context,
+	participantID livekit.ParticipantID,
+	track *livekit.TrackInfo,
+) {
+	t.enqueue(func() {
+		prometheus.RecordTrackRelayAttempt()
+
+		room := t.getRoomDetails(participantID)
+		ev := newTrackEvent(livekit.AnalyticsEventType_TRACK_SUBSCRIBE_REQUESTED, room, participantID, track)
+		t.SendEvent(ctx, ev)
+	})
+}
+
+func (t *telemetryService) TrackRelayed(
+	ctx context.Context,
+	participantID livekit.ParticipantID,
+	track *livekit.TrackInfo,
+	publisher *livekit.ParticipantInfo,
+	shouldSendEvent bool,
+) {
+	t.enqueue(func() {
+		prometheus.RecordTrackRelaySuccess(track.Type.String())
+
+		if !shouldSendEvent {
+			return
+		}
+
+		room := t.getRoomDetails(participantID)
+		ev := newTrackEvent(livekit.AnalyticsEventType_TRACK_SUBSCRIBED, room, participantID, track)
+		ev.Publisher = publisher
+		t.SendEvent(ctx, ev)
+	})
+}
+
+func (t *telemetryService) TrackRelayFailed(
+	ctx context.Context,
+	participantID livekit.ParticipantID,
+	trackID livekit.TrackID,
+	err error,
+	isUserError bool,
+) {
+	t.enqueue(func() {
+		prometheus.RecordTrackRelayFailure(err, isUserError)
+
+		room := t.getRoomDetails(participantID)
+		ev := newTrackEvent(livekit.AnalyticsEventType_TRACK_SUBSCRIBE_FAILED, room, participantID, &livekit.TrackInfo{
+			Sid: string(trackID),
+		})
+		ev.Error = err.Error()
+		t.SendEvent(ctx, ev)
+	})
+}
+
+func (t *telemetryService) TrackRelayRemoved(
+	ctx context.Context,
+	participantID livekit.ParticipantID,
+	track *livekit.TrackInfo,
+	shouldSendEvent bool,
+) {
+	t.enqueue(func() {
+		prometheus.RecordTrackRelayRemoved(track.Type.String())
+
+		if shouldSendEvent {
+			room := t.getRoomDetails(participantID)
+			t.SendEvent(ctx, newTrackEvent(livekit.AnalyticsEventType_TRACK_UNSUBSCRIBED, room, participantID, track))
+		}
+	})
+}
+
 func (t *telemetryService) TrackUnpublished(
 	ctx context.Context,
 	participantID livekit.ParticipantID,

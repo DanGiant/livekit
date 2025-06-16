@@ -179,6 +179,8 @@ func GetUpdatedNodeStats(prev *livekit.NodeStats, prevAverage *livekit.NodeStats
 	trackPublishSuccessNow := trackPublishSuccess.Load()
 	trackSubscribeAttemptsNow := trackSubscribeAttempts.Load()
 	trackSubscribeSuccessNow := trackSubscribeSuccess.Load()
+	//trackRelayAttemptsNow := trackRelayAttempts.Load()
+	//trackRelaySuccessNow := trackRelaySuccess.Load()
 	forwardLatencyNow := forwardLatency.Load()
 	forwardJitterNow := forwardJitter.Load()
 

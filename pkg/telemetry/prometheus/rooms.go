@@ -29,21 +29,27 @@ var (
 	participantCurrent     atomic.Int32
 	trackPublishedCurrent  atomic.Int32
 	trackSubscribedCurrent atomic.Int32
+	trackRelayedCurrent    atomic.Int32
 	trackPublishAttempts   atomic.Int32
 	trackPublishSuccess    atomic.Int32
 	trackSubscribeAttempts atomic.Int32
 	trackSubscribeSuccess  atomic.Int32
+	trackRelayAttempts     atomic.Int32
+	trackRelaySuccess      atomic.Int32
 	// count the number of failures that are due to user error (permissions, track doesn't exist), so we could compute
 	// success rate by subtracting this from total attempts
 	trackSubscribeUserError atomic.Int32
+	trackRelayUserError     atomic.Int32
 
 	promRoomCurrent            prometheus.Gauge
 	promRoomDuration           prometheus.Histogram
 	promParticipantCurrent     prometheus.Gauge
 	promTrackPublishedCurrent  *prometheus.GaugeVec
 	promTrackSubscribedCurrent *prometheus.GaugeVec
+	promTrackRelayedCurrent    *prometheus.GaugeVec
 	promTrackPublishCounter    *prometheus.CounterVec
 	promTrackSubscribeCounter  *prometheus.CounterVec
+	promTrackRelayCounter      *prometheus.CounterVec
 	promSessionStartTime       *prometheus.HistogramVec
 	promSessionDuration        *prometheus.HistogramVec
 	promPubSubTime             *prometheus.HistogramVec
@@ -83,6 +89,12 @@ func initRoomStats(nodeID string, nodeType livekit.NodeType) {
 		Name:        "subscribed_total",
 		ConstLabels: prometheus.Labels{"node_id": nodeID, "node_type": nodeType.String()},
 	}, []string{"kind"})
+	promTrackRelayedCurrent = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace:   livekitNamespace,
+		Subsystem:   "track",
+		Name:        "relayed_total",
+		ConstLabels: prometheus.Labels{"node_id": nodeID, "node_type": nodeType.String()},
+	}, []string{"kind"})
 	promTrackPublishCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace:   livekitNamespace,
 		Subsystem:   "track",
@@ -93,6 +105,12 @@ func initRoomStats(nodeID string, nodeType livekit.NodeType) {
 		Namespace:   livekitNamespace,
 		Subsystem:   "track",
 		Name:        "subscribe_counter",
+		ConstLabels: prometheus.Labels{"node_id": nodeID, "node_type": nodeType.String()},
+	}, []string{"state", "error"})
+	promTrackRelayCounter = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace:   livekitNamespace,
+		Subsystem:   "track",
+		Name:        "relay_counter",
 		ConstLabels: prometheus.Labels{"node_id": nodeID, "node_type": nodeType.String()},
 	}, []string{"state", "error"})
 	promSessionStartTime = prometheus.NewHistogramVec(prometheus.HistogramOpts{
@@ -122,8 +140,10 @@ func initRoomStats(nodeID string, nodeType livekit.NodeType) {
 	prometheus.MustRegister(promParticipantCurrent)
 	prometheus.MustRegister(promTrackPublishedCurrent)
 	prometheus.MustRegister(promTrackSubscribedCurrent)
+	prometheus.MustRegister(promTrackRelayedCurrent)
 	prometheus.MustRegister(promTrackPublishCounter)
 	prometheus.MustRegister(promTrackSubscribeCounter)
+	prometheus.MustRegister(promTrackRelayCounter)
 	prometheus.MustRegister(promSessionStartTime)
 	prometheus.MustRegister(promSessionDuration)
 	prometheus.MustRegister(promPubSubTime)
@@ -180,6 +200,10 @@ func RecordSubscribeTime(source livekit.TrackSource, trackType livekit.TrackType
 	recordPubSubTime(false, source, trackType, d, sdk, kind, count)
 }
 
+func RecordRelayTime(source livekit.TrackSource, trackType livekit.TrackType, d time.Duration, sdk livekit.ClientInfo_SDK, kind livekit.ParticipantInfo_Kind, count int) {
+	recordPubSubTime(false, source, trackType, d, sdk, kind, count)
+}
+
 func recordPubSubTime(isPublish bool, source livekit.TrackSource, trackType livekit.TrackType, d time.Duration, sdk livekit.ClientInfo_SDK, kind livekit.ParticipantInfo_Kind, count int) {
 	direction := "subscribe"
 	if isPublish {
@@ -214,6 +238,35 @@ func RecordTrackSubscribeFailure(err error, isUserError bool) {
 
 	if isUserError {
 		trackSubscribeUserError.Inc()
+	}
+}
+
+func RecordTrackRelaySuccess(kind string) {
+	// modify both current and total counters
+	promTrackRelayedCurrent.WithLabelValues(kind).Add(1)
+	trackRelayedCurrent.Inc()
+
+	promTrackRelayCounter.WithLabelValues("success", "").Inc()
+	trackRelaySuccess.Inc()
+}
+
+func RecordTrackRelayRemoved(kind string) {
+	// relay removed modifies current counter, but we leave the total values alone since they
+	// are used to compute rate
+	promTrackRelayedCurrent.WithLabelValues(kind).Sub(1)
+	trackRelayedCurrent.Dec()
+}
+
+func RecordTrackRelayAttempt() {
+	trackRelayAttempts.Inc()
+	promTrackRelayCounter.WithLabelValues("attempt", "").Inc()
+}
+
+func RecordTrackRelayFailure(err error, isUserError bool) {
+	promTrackRelayCounter.WithLabelValues("failure", err.Error()).Inc()
+
+	if isUserError {
+		trackRelayUserError.Inc()
 	}
 }
 

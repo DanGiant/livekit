@@ -1,11 +1,13 @@
 package rtc
 
 import (
+	"context"
 	"errors"
 	"github.com/livekit/livekit-server/pkg/rtc/relay"
 	"github.com/livekit/livekit-server/pkg/rtc/types"
 	"github.com/livekit/livekit-server/pkg/sfu"
 	"github.com/livekit/livekit-server/pkg/telemetry"
+	"github.com/livekit/livekit-server/pkg/telemetry/prometheus"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/logger"
 	"github.com/livekit/protocol/utils"
@@ -365,15 +367,15 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 		}
 
 		numAttempts := t.getNumAttempts()
-		//if numAttempts == 0 {
-		//	m.params.Telemetry.TrackSubscribeRequested(
-		//		context.Background(),
-		//		m.params.Participant.ID(),
-		//		&livekit.TrackInfo{
-		//			Sid: string(t.trackID),
-		//		},
-		//	)
-		//}
+		if numAttempts == 0 {
+			m.params.Telemetry.TrackRelayRequested(
+				context.Background(),
+				m.params.Participant.ID(),
+				&livekit.TrackInfo{
+					Sid: string(t.trackID),
+				},
+			)
+		}
 
 		m.logger.Debugw("add track relay",
 			"RemoteNodeID", t.remoteNodeID, "TrackID", t.trackID)
@@ -394,14 +396,14 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 				// We'll still log an event to reflect this in telemetry since it's been too long
 				if t.durationSinceStart() > subscriptionTimeout {
 					t.logger.Errorw("create track relay to remote node failed!", err)
-					//t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, true)
+					t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, true)
 				}
 			case ErrTrackNotFound:
 				// source track was never published or closed
 				// if after timeout we'd unsubscribe from it.
 				// this is the *only* case we'd change desired state
 				if t.durationSinceStart() > notFoundTimeout {
-					//t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, true)
+					t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, true)
 					t.logger.Infow("source track does not exist, will remove track relay", "error", err)
 					t.setDesired(false)
 					m.queueTrackRelayReconcile(t.remoteNodeID, t.trackID)
@@ -413,7 +415,7 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 					t.logger.Warnw("failed to relay track to remote node, triggering error handler", err,
 						"attempt", numAttempts,
 					)
-					//t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, false)
+					t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, false)
 					//m.params.OnSubscriptionError(s.trackID, true, err)
 				} else {
 					t.logger.Debugw("failed to relay track to remote node, retrying",
@@ -650,6 +652,7 @@ func (m *RelayManager) addTrackRelay(t *trackRelay) error {
 		//	t.maybeRecordSuccess(m.params.Telemetry, m.params.Participant.ID())
 		//})
 		t.setRelayedTrack(relayedTrack)
+		t.maybeRecordSuccess(m.params.Telemetry, m.params.Participant.ID())
 
 		switch track.Kind() {
 		case livekit.TrackType_VIDEO:
@@ -773,27 +776,27 @@ func (m *RelayManager) handleSourceTrackRemoved(remoteNodeID livekit.NodeID, tra
 func (m *RelayManager) handleRelayedTrackClose(t *trackRelay, isExpectedToResume bool) {
 	// TODO: to be done
 
-	//t.logger.Debugw(
-	//	"relayed track closed",
-	//	//"isExpectedToResume", isExpectedToResume,
-	//)
+	t.logger.Debugw(
+		"relayed track closed",
+		"isExpectedToResume", isExpectedToResume,
+	)
 	//wasBound := t.isBound()
-	//subTrack := t.getSubscribedTrack()
-	//if subTrack == nil {
-	//	return
-	//}
-	//s.setSubscribedTrack(nil)
-	//
+	relayedTrack := t.getRelayedTrack()
+	if relayedTrack == nil {
+		return
+	}
+	//m.setRelayedTrack(nil)
+
 	//var relieveFromLimits bool
-	//switch subTrack.MediaTrack().Kind() {
+	//switch relayedTrack.MediaTrack().Kind() {
 	//case livekit.TrackType_VIDEO:
-	//	videoCount := m.subscribedVideoCount.Dec()
-	//	relieveFromLimits = m.params.SubscriptionLimitVideo > 0 && videoCount == m.params.SubscriptionLimitVideo-1
+	//	videoCount := m.relayedVideoCount.Dec()
+	//	relieveFromLimits = m.params.RelayLimitVideo > 0 && videoCount == m.params.RelayLimitVideo-1
 	//case livekit.TrackType_AUDIO:
-	//	audioCount := m.subscribedAudioCount.Dec()
-	//	relieveFromLimits = m.params.SubscriptionLimitAudio > 0 && audioCount == m.params.SubscriptionLimitAudio-1
+	//	audioCount := m.relayedAudioCount.Dec()
+	//	relieveFromLimits = m.params.RelayLimitAudio > 0 && audioCount == m.params.RelayLimitAudio-1
 	//}
-	//
+
 	//// remove from subscribedTo
 	//publisherID := s.getPublisherID()
 	//lastSubscription := false
@@ -819,33 +822,35 @@ func (m *RelayManager) handleRelayedTrackClose(t *trackRelay, isExpectedToResume
 	//// * the participant isn't closing
 	//// * it's not a migration
 	//if wasBound {
-	//	m.params.Telemetry.TrackUnsubscribed(
-	//		context.Background(),
-	//		m.params.Participant.ID(),
-	//		&livekit.TrackInfo{Sid: string(s.trackID), Type: subTrack.MediaTrack().Kind()},
-	//		!isExpectedToResume,
-	//	)
-	//
-	//	dt := subTrack.DownTrack()
-	//	if dt != nil {
-	//		stats := dt.GetTrackStats()
-	//		if stats != nil {
-	//			m.params.Telemetry.TrackSubscribeRTPStats(
-	//				context.Background(),
-	//				m.params.Participant.ID(),
-	//				s.trackID,
-	//				dt.Mime(),
-	//				stats,
-	//			)
-	//		}
+
+	m.params.Telemetry.TrackRelayRemoved(
+		context.Background(),
+		m.params.Participant.ID(),
+		&livekit.TrackInfo{Sid: string(t.trackID), Type: relayedTrack.MediaTrack().Kind()},
+		!isExpectedToResume,
+	)
+
+	//dt := relayedTrack.DownTrack()
+	//if dt != nil {
+	//	stats := dt.GetTrackStats()
+	//	if stats != nil {
+	//		m.params.Telemetry.TrackSubscribeRTPStats(
+	//			context.Background(),
+	//			m.params.Participant.ID(),
+	//			t.trackID,
+	//			dt.Mime(),
+	//			stats,
+	//		)
 	//	}
 	//}
-	//
+
+	//}
+
 	//if !isExpectedToResume {
-	//	sender := subTrack.RTPSender()
+	//	sender := relayedTrack.RTPSender()
 	//	if sender != nil {
-	//		s.logger.Debugw("removing PeerConnection track",
-	//			"kind", subTrack.MediaTrack().Kind(),
+	//		t.logger.Debugw("removing PeerConnection track",
+	//			"kind", relayedTrack.MediaTrack().Kind(),
 	//		)
 	//
 	//		if err := m.params.Participant.RemoveTrackLocal(sender); err != nil {
@@ -854,8 +859,8 @@ func (m *RelayManager) handleRelayedTrackClose(t *trackRelay, isExpectedToResume
 	//				// been set to Inactive
 	//				m.params.Logger.Debugw("could not remove remoteTrack from forwarder",
 	//					"error", err,
-	//					"publisher", subTrack.PublisherIdentity(),
-	//					"publisherID", subTrack.PublisherID(),
+	//					"publisher", relayedTrack.PublisherIdentity(),
+	//					"publisherID", relayedTrack.PublisherID(),
 	//				)
 	//			}
 	//		}
@@ -863,9 +868,10 @@ func (m *RelayManager) handleRelayedTrackClose(t *trackRelay, isExpectedToResume
 	//
 	//	m.params.Participant.Negotiate(false)
 	//} else {
-	//	t := time.Now()
-	//	s.subscribeAt.Store(&t)
+	//	timeNow := time.Now()
+	//	t.relayAt.Store(&timeNow)
 	//}
+
 	//if !m.params.UseOneShotSignallingMode {
 	//	if relieveFromLimits {
 	//		m.queueReconcile(trackIDForReconcileSubscriptions)
@@ -894,7 +900,7 @@ type trackRelay struct {
 	relayedTrack             types.RelayedTrack
 	//relayedCodecQualities      []types.SubscribedCodecQuality
 
-	//eventSent                atomic.Bool
+	eventSent   atomic.Bool
 	numAttempts atomic.Int32
 	bound       bool
 	kind        atomic.Pointer[livekit.TrackType]
@@ -1073,6 +1079,38 @@ func (t *trackRelay) handleSourceTrackRemoved() {
 
 	t.setChangedNotifierLocked(nil)
 	t.setRemovedNotifierLocked(nil)
+}
+
+func (s *trackRelay) maybeRecordError(ts telemetry.TelemetryService, pID livekit.ParticipantID, err error, isUserError bool) {
+	if s.eventSent.Swap(true) {
+		return
+	}
+
+	ts.TrackRelayFailed(context.Background(), pID, s.trackID, err, isUserError)
+}
+
+func (s *trackRelay) maybeRecordSuccess(ts telemetry.TelemetryService, pID livekit.ParticipantID) {
+	relayedTrack := s.getRelayedTrack()
+	if relayedTrack == nil {
+		return
+	}
+	mediaTrack := relayedTrack.MediaTrack()
+	if mediaTrack == nil {
+		return
+	}
+
+	d := time.Since(*s.relayAt.Load())
+	s.logger.Debugw("track relayed", "cost", d.Milliseconds())
+	prometheus.RecordRelayTime(mediaTrack.Source(), mediaTrack.Kind(), d,
+		livekit.ClientInfo_GO, livekit.ParticipantInfo_STANDARD, int(s.succRecordCounter.Inc()))
+
+	eventSent := s.eventSent.Swap(true)
+
+	pi := &livekit.ParticipantInfo{
+		Identity: string(relayedTrack.PublisherIdentity()),
+		Sid:      string(relayedTrack.PublisherID()),
+	}
+	ts.TrackRelayed(context.Background(), pID, mediaTrack.ToProto(), pi, !eventSent)
 }
 
 func (t *trackRelay) durationSinceStart() time.Duration {
