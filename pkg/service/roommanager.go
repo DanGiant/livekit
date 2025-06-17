@@ -856,8 +856,11 @@ func (m *RoomManager) CreateRelayParticipantToNode(participantID livekit.Partici
 	}
 
 	sid := participant.ID()
+	name := participant.Name()
+
 	logger.Infow("Trying to create relay signal",
-		"RemoteNode", string(toNode), "Room", roomName, "Participant", string(sid))
+		"RemoteNode", string(toNode), "Room", roomName,
+		"pID", string(sid), "Participant", string(name))
 
 	//clientInfo := *participant.GetClientInfo()
 	//clientInfo.Sdk = livekit.ClientInfo_GO
@@ -899,9 +902,14 @@ func (m *RoomManager) CreateRelayParticipantToNode(participantID livekit.Partici
 	_, reqSink, resSource, err := (*m.relaySignalClient).StartParticipantRelaySignal(context.Background(), roomName, toNode, pri)
 	if err != nil {
 		logger.Errorw("start relay signal client failed", err,
-			"ToNode", string(toNode), "Room", roomName, "ParticipantSid", string(sid))
+			"ToNode", string(toNode), "Room", roomName,
+			"pID", string(sid), "Participant", string(name))
 		return nil, err
 	}
+
+	logger.Infow("start relay signal client success",
+		"ToNode", string(toNode), "Room", roomName,
+		"pID", string(sid), "Participant", string(name))
 
 	signalClient := relay.NewRelaySignalClient(relay.RelaySignalClientParams{
 		Logger:    logger.GetLogger(),

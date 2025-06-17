@@ -820,7 +820,7 @@ func (w *WebRTCReceiver) forwardRTP(layer int32, buff *buffer.Buffer) {
 	for {
 		pkt, err := buff.ReadExtended(pktBuf)
 		if err == io.EOF {
-			w.logger.Errorw("forwardRTP EOF", err, "layer", layer)
+			w.logger.Debugw("forwardRTP EOF", "layer", layer)
 			return
 		}
 

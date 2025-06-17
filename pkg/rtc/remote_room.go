@@ -290,8 +290,14 @@ func (m *RemoteRoom) reconcileParticipantRelaying(r *participantRelaying) {
 		if err != nil {
 			m.logger.Errorw("create relay participant failed", err, "ParticipantID", r.participantID,
 				"remoteNodeID", m.remoteNodeID, "RoomName", m.room.Name())
+
+			r.lock.Lock()
+			r.relayParticipant = nil
+			r.state = RelayingStatus_IDLE
+			r.lock.Unlock()
 			return
 		}
+
 		rp.AddOnClose(func() {
 			r.lock.Lock()
 			r.relayParticipant = nil

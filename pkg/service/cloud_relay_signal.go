@@ -51,7 +51,7 @@ func (s *defaultRelaySessionHandler) HandleRoomOnline(ctx context.Context, roomN
 		"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
 
 	if s.roomManager.currentNode.NodeID() == remoteNode {
-		logger.Infow("local node is the remote node", "roomName", roomName,
+		logger.Infow("loopback request, abandoned!", "roomName", roomName,
 			"localNodeID", s.roomManager.currentNode.NodeID(), "remoteNodeID", remoteNode)
 		return ErrRoomNotFound
 	}
@@ -314,19 +314,16 @@ func (r *cloudRelayServiceSignalClient) StartParticipantRelaySignal(
 	if err != nil {
 		return
 	}
-	//srs := &rpc.StartRelaySession{
-	//	RoomName:     string(roomName),
-	//	ConnectionId: string(connectionID),
-	//}
 
 	l := logger.GetLogger().WithValues(
 		"room", roomName,
 		"toNode", toNode,
+		"pID", pri.ID,
 		"participant", pri.Identity,
 		"connID", connectionID,
 	)
 
-	l.Debugw("starting cloud relay signal connection")
+	l.Infow("starting cloud relay signal connection")
 
 	stream, err := r.client.RoomSignalRelay(ctx, toNode)
 	if err != nil {
@@ -337,9 +334,12 @@ func (r *cloudRelayServiceSignalClient) StartParticipantRelaySignal(
 
 	err = stream.Send(&rpc.RoomSignalRelayRequest{StartRelaySession: srs})
 	if err != nil {
-		stream.Close(err)
 		l.Errorw("failed to send RoomSignalRelayRequest", err)
 		prometheus.MessageCounter.WithLabelValues("cloud_relay_signal", "failure").Add(1)
+		err2 := stream.Close(err)
+		if err2 != nil {
+			l.Errorw("failed to close relay signal stream", err2)
+		}
 		return connectionID, nil, nil, err
 	}
 

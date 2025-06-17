@@ -442,7 +442,7 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 		if err := m.removeTrackRelay(t); err != nil {
 			if errors.Is(err, ErrTrackNotFound) {
 
-				m.logger.Errorw("track relay not found", err,
+				m.logger.Errorw("track relay not found when removing", err,
 					"RemoteNodeID", t.remoteNodeID, "TrackID", t.trackID)
 
 				t.lock.Lock()
@@ -567,11 +567,16 @@ func (m *RelayManager) addTrackRelay(t *trackRelay) error {
 		return relay.ErrNoRelayToRemoteNode
 	}
 
-	if rp.State() != livekit.ParticipantInfo_JOINED {
-		m.logger.Errorw("relay manager: relay participant not joined, will retry later",
+	if rp.State() == livekit.ParticipantInfo_JOINING {
+		m.logger.Errorw("relay manager: relay participant has not joined yet, will retry later",
 			relay.ErrParticipantNotReadyForRelay,
 			"RemoteNode", t.remoteNodeID, "TrackID", trackID)
 		return relay.ErrParticipantNotReadyForRelay
+	} else if rp.State() == livekit.ParticipantInfo_DISCONNECTED {
+		m.logger.Errorw("relay manager: relay participant is disconnected!",
+			relay.ErrParticipantRelaySignalBroken,
+			"RemoteNode", t.remoteNodeID, "TrackID", trackID)
+		return relay.ErrParticipantRelaySignalBroken
 	}
 
 	res := m.params.TrackResolver(m.params.Participant, trackID)
