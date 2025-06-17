@@ -33,6 +33,7 @@ var (
 	ErrAborted                      = errors.New("operation was aborted")
 	ErrRelayParticipantAlreadyExist = errors.New("Relay participant already exist")
 	ErrParticipantNotReadyForRelay  = errors.New("Participant not ready for relay")
+	ErrParticipantRelaySignalBroken = errors.New("Participant's relay signal is broken")
 	ErrNoRelayToRemoteNode          = errors.New("no relay to remote node")
 	ErrParticipantIsNotPublisher    = errors.New("Participant is not publisher")
 	ErrNoRemoteRoom                 = errors.New("no remote room found")
