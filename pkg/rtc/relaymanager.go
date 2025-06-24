@@ -388,7 +388,7 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 			t.recordAttempt(false)
 
 			switch err {
-			case ErrNoReceiver, ErrNotOpen:
+			case ErrNoReceiver, ErrNotOpen, relay.ErrNoRelayToRemoteNode, relay.ErrParticipantNotReadyForRelay:
 				// these are errors that are out of our control, so we'll keep trying
 				// - ErrNoReceiver: Track is in the process of closing (another local track published to the same instance)
 				// - ErrNotOpen: Track is closing or already closed
@@ -398,7 +398,7 @@ func (m *RelayManager) reconcileTrackRelay(t *trackRelay) {
 					t.logger.Errorw("create track relay to remote node failed!", err)
 					t.maybeRecordError(m.params.Telemetry, m.params.Participant.ID(), err, true)
 				}
-			case ErrTrackNotFound:
+			case ErrTrackNotFound, relay.ErrTrackCannotBeRelayed, relay.ErrRelayLimitExceeded:
 				// source track was never published or closed
 				// if after timeout we'd unsubscribe from it.
 				// this is the *only* case we'd change desired state
