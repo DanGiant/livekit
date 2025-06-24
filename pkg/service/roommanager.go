@@ -1050,7 +1050,8 @@ func (r *RoomManager) getOrCreateRoom(ctx context.Context, createRoom *livekit.C
 			nodes, err := signalClient.RoomOnline(ctx, roomName, true)
 			if err == nil {
 				if len(*nodes) > 0 {
-					logger.Infow("relay service for room success", "RoomName", roomName, "RoomNum", len(*nodes))
+					logger.Infow("relay service RoomOnline request find remote room",
+						"RoomName", roomName, "RemoteRoomNum", len(*nodes))
 					for _, node := range *nodes {
 						remoteRoom := rtc.NewRemoteRoom(rtc.RemoteRoomParams{
 							Logger:       newRoom.Logger,
@@ -1060,15 +1061,28 @@ func (r *RoomManager) getOrCreateRoom(ctx context.Context, createRoom *livekit.C
 						newRoom.AddRemoteRoom(remoteRoom)
 
 						participants := newRoom.GetLocalParticipants()
+
+						var relayedNum = 0
 						for _, p := range participants {
+
+							logger.Infow("relay service find a remote room",
+								"RoomName", roomName, "RemoteNodeID", string(node),
+								"IsRecorder", p.IsRecorder(), "IsDependent", p.IsDependent(), "IsPublisher", p.IsPublisher(),
+								"State", p.State().String())
+
 							if !p.IsRecorder() && !p.IsDependent() && p.IsPublisher() &&
 								(p.State() == livekit.ParticipantInfo_JOINED || p.State() == livekit.ParticipantInfo_ACTIVE) {
 								remoteRoom.AddParticipant(p.ID())
+								relayedNum++
 							}
 						}
+
+						logger.Infow("relay service find a remote room",
+							"RoomName", roomName, "RemoteNodeID", string(node),
+							"LocalParticipantNum", len(participants), "RelayedNum", relayedNum)
 					}
 				} else {
-					logger.Infow("relay service find no other room", "RoomName", roomName)
+					logger.Infow("relay service RoomOnline request find no remote room", "RoomName", roomName)
 				}
 			} else if err == ErrRoomNotFound {
 				logger.Infow("relay service find no other room", "RoomName", roomName)
