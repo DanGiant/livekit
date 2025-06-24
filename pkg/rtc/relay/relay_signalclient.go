@@ -48,7 +48,7 @@ func NewRelaySignalClient(params RelaySignalClientParams) *RelaySignalClient {
 		logger:      params.Logger,
 		reqSink:     params.ReqSink,
 		resSource:   params.ResSource,
-		clientState: livekit.ParticipantInfo_DISCONNECTED,
+		clientState: livekit.ParticipantInfo_JOINING,
 	}
 	return c
 }
