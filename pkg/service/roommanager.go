@@ -1070,7 +1070,7 @@ func (r *RoomManager) getOrCreateRoom(ctx context.Context, createRoom *livekit.C
 								"IsRecorder", p.IsRecorder(), "IsDependent", p.IsDependent(), "IsPublisher", p.IsPublisher(),
 								"State", p.State().String())
 
-							if !p.IsRecorder() && !p.IsDependent() && p.IsPublisher() &&
+							if !p.IsRecorder() && !p.IsDependent() &&
 								(p.State() == livekit.ParticipantInfo_JOINED || p.State() == livekit.ParticipantInfo_ACTIVE) {
 								remoteRoom.AddParticipant(p.ID())
 								relayedNum++
@@ -1131,7 +1131,7 @@ func (r *RoomManager) AddRemoteNodeToRoom(ctx context.Context, roomName livekit.
 				"IsDependent", p.IsDependent(), "IsPublisher", p.IsPublisher(),
 				"state", p.State().String())
 
-			if !p.IsRecorder() && !p.IsDependent() && p.IsPublisher() &&
+			if !p.IsRecorder() && !p.IsDependent() &&
 				(p.State() == livekit.ParticipantInfo_JOINED || p.State() == livekit.ParticipantInfo_ACTIVE) {
 				remoteRoom.AddParticipant(p.ID())
 			}
